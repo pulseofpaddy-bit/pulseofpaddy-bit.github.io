@@ -1,21 +1,68 @@
-<!doctype html>
+
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#1a0533" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>Pulse</title>
-    <script type="module" crossorigin src="/assets/index-BsGSSGFv.js"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <title>Pulse App</title>
+
+  <!-- PWA Support -->
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#1a0533" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Pulse" />
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root { width: 100%; min-height: 100vh; min-height: 100dvh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+
+  <!-- React 18 via CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+
+  <!-- Babel standalone — transpiles JSX in the browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+
+  <!-- Load PulseApp.jsx as JSX -->
+  <script type="text/babel" data-type="module">
+    const { useState, useEffect, useRef } = React;
+
+
+    try {
+    const response = await fetch('./PulseApp.jsx');
+    if (!response.ok) throw new Error('Could not load PulseApp.jsx — make sure you are running a local server');
+    let source = await response.text();
+
+
+    source = source.replace(/^import\s+\{[^}]+\}\s+from\s+['"]react['"];?\s*/m, '');
+    source = source.replace(/^export\s+default\s+/m, 'const __PulseApp__ = ');
+
+
+    const transpiled = Babel.transform(source, {
+      presets: ['react'],
+    }).code;
+
+
+    const fn = new Function('React', 'useState', 'useEffect', 'useRef', transpiled + '\nreturn __PulseApp__;');
+    const PulseApp = fn(React, useState, useEffect, useRef);
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(PulseApp));
+    } catch(e) {
+      document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">ERROR: ' + e.message + '\n\n' + (e.stack||'') + '</pre>';
+      console.error(e);
+    }
+  </script>
+</body>
 </html>
