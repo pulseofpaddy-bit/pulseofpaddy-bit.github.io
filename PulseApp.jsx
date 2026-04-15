@@ -563,10 +563,10 @@ export default function PulseApp() {
   const [movieTab, setMovieTab] = useState(null);
 
   // ─── FAMILY WORKSPACE AUTH STATE ────────────────────────────────────────
-  const [fwUser, setFwUser]               = useState(() => { try { return JSON.parse(sessionStorage.getItem("pulse_fw_user")||"null"); } catch { return null; } });
-  const [fwToken, setFwToken]             = useState(() => sessionStorage.getItem("pulse_fw_token")||null);
-  const [fwRole, setFwRole]               = useState(() => sessionStorage.getItem("pulse_fw_role")||null); // "head" | "member"
-  const [fwWorkspace, setFwWorkspace]     = useState(() => { try { return JSON.parse(sessionStorage.getItem("pulse_fw_workspace")||"null"); } catch { return null; } }); // { folderId, fileIds:{grocery,todos,appointments,members} }
+  const [fwUser, setFwUser]               = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_fw_user")||"null"); } catch { return null; } });
+  const [fwToken, setFwToken]             = useState(() => localStorage.getItem("pulse_fw_token")||null);
+  const [fwRole, setFwRole]               = useState(() => localStorage.getItem("pulse_fw_role")||null); // "head" | "member"
+  const [fwWorkspace, setFwWorkspace]     = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_fw_workspace")||"null"); } catch { return null; } }); // { folderId, fileIds:{grocery,todos,appointments,members} }
   const [fwMembers, setFwMembers]         = useState([]);  // [{ name, email, role, joinedAt }]
   const [fwScreen, setFwScreen]           = useState("home"); // "home" | "setup" | "invite"
   const [fwLoading, setFwLoading]         = useState(false);
@@ -582,8 +582,8 @@ export default function PulseApp() {
   // Steps: "splash" → "role" → "add_members" → done (null)
   const [onboardingStep, setOnboardingStep] = useState(() => {
     // If already signed in with a role, skip onboarding
-    const user = sessionStorage.getItem("pulse_fw_user");
-    const role = sessionStorage.getItem("pulse_fw_role");
+    const user = localStorage.getItem("pulse_fw_user");
+    const role = localStorage.getItem("pulse_fw_role");
     if (user && user !== "null" && role) return null;
     if (user && user !== "null" && !role) return "role";
     return "splash";
@@ -1532,14 +1532,14 @@ export default function PulseApp() {
   const MAX_ACCOUNTS = 5;
 
   const [gAccounts, setGAccounts] = useState(() => {
-    try { return JSON.parse(sessionStorage.getItem("pulse_gaccounts") || "[]"); } catch(e) { return []; }
+    try { return JSON.parse(localStorage.getItem("pulse_gaccounts") || "[]"); } catch(e) { return []; }
   });
   const [gSyncing, setGSyncing]   = useState({}); // { email: true/false }
   const [gSyncMsg, setGSyncMsg]   = useState({}); // { email: "message" }
 
   function saveGAccounts(accounts) {
     setGAccounts(accounts);
-    sessionStorage.setItem("pulse_gaccounts", JSON.stringify(accounts));
+    localStorage.setItem("pulse_gaccounts", JSON.stringify(accounts));
   }
 
   function googleAddAccount() {
@@ -1577,22 +1577,22 @@ export default function PulseApp() {
           headers: { Authorization: `Bearer ${token}` }
         }).then(r => r.json()).then(profile => {
           const email = profile.email || `account_${Date.now()}`;
-          const existing = JSON.parse(sessionStorage.getItem("pulse_gaccounts") || "[]");
+          const existing = JSON.parse(localStorage.getItem("pulse_gaccounts") || "[]");
           if (existing.find(a => a.email === email)) {
             // Update token for existing account
             const updated = existing.map(a => a.email === email ? { ...a, token } : a);
-            sessionStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
+            localStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
             setGAccounts(updated);
           } else {
             const updated = [...existing, { email, token, name: profile.name || email, picture: profile.picture || "" }];
-            sessionStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
+            localStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
             setGAccounts(updated);
           }
         }).catch(() => {
-          const existing = JSON.parse(sessionStorage.getItem("pulse_gaccounts") || "[]");
+          const existing = JSON.parse(localStorage.getItem("pulse_gaccounts") || "[]");
           const email = `account_${Date.now()}`;
           const updated = [...existing, { email, token, name: email }];
-          sessionStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
+          localStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
           setGAccounts(updated);
         });
         window.history.replaceState({}, "", window.location.pathname);
@@ -2460,8 +2460,8 @@ export default function PulseApp() {
   const PING_GOOGLE_SCOPES     = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
 
   const [pingScreen, setPingScreen]         = useState("home"); // home|chat|newGroup|setPassword|login
-  const [pingMe, setPingMe]                 = useState(() => { try { return JSON.parse(sessionStorage.getItem("pulse_ping_user")||"null"); } catch { return null; } });
-  const [pingToken, setPingToken]           = useState(() => sessionStorage.getItem("pulse_ping_token")||"");
+  const [pingMe, setPingMe]                 = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_ping_user")||"null"); } catch { return null; } });
+  const [pingToken, setPingToken]           = useState(() => localStorage.getItem("pulse_ping_token")||"");
   const [pingEncryptEnabled, setPingEncryptEnabled] = useState(() => localStorage.getItem("pulse_ping_encrypt") === "true");
   const [pingPassword, setPingPassword]     = useState(() => sessionStorage.getItem("pulse_ping_pass")||"PulseDefaultKey2026");
   const [pingPasswordInput, setPingPasswordInput] = useState("");
@@ -2539,14 +2539,14 @@ export default function PulseApp() {
       const token  = params.get("access_token");
       if (token) {
         setPingToken(token);
-        sessionStorage.setItem("pulse_ping_token", token);
+        localStorage.setItem("pulse_ping_token", token);
         // Fetch Google profile
         fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
           headers:{ Authorization:`Bearer ${token}` }
         }).then(r=>r.json()).then(profile=>{
           const user = { email: profile.email, name: profile.name, photo: profile.picture, id: profile.id };
           setPingMe(user);
-          sessionStorage.setItem("pulse_ping_user", JSON.stringify(user));
+          localStorage.setItem("pulse_ping_user", JSON.stringify(user));
           // Register in Firebase
           fetch(`${PING_USERS}/${profile.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
           // Only prompt for password if encryption is enabled
@@ -2566,8 +2566,8 @@ export default function PulseApp() {
       const user = { email: fwUser.email, name: fwUser.name, photo: fwUser.photo, id: fwUser.id || fwUser.email.replace(/[^a-zA-Z0-9]/g,"") };
       setPingMe(user);
       setPingToken(fwToken);
-      sessionStorage.setItem("pulse_ping_user", JSON.stringify(user));
-      sessionStorage.setItem("pulse_ping_token", fwToken);
+      localStorage.setItem("pulse_ping_user", JSON.stringify(user));
+      localStorage.setItem("pulse_ping_token", fwToken);
       // Register in Firebase
       fetch(`${PING_BASE}/users/${user.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
       // Go straight to home — no password needed unless encryption enabled
@@ -2752,7 +2752,7 @@ export default function PulseApp() {
       const token  = params.get("access_token");
       if (token) {
         setFwToken(token);
-        sessionStorage.setItem("pulse_fw_token", token);
+        localStorage.setItem("pulse_fw_token", token);
         window.history.replaceState({}, "", window.location.pathname);
         // Fetch Google profile
         fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
@@ -2760,21 +2760,21 @@ export default function PulseApp() {
         }).then(r=>r.json()).then(async profile => {
           const user = { email: profile.email, name: profile.name, photo: profile.picture, id: profile.id };
           setFwUser(user);
-          sessionStorage.setItem("pulse_fw_user", JSON.stringify(user));
+          localStorage.setItem("pulse_fw_user", JSON.stringify(user));
 
           // Check if this user is already a known family member (added by a head)
           setFwLoading(true);
           try {
             const ws = await fwInitWorkspace(token);
             setFwWorkspace(ws);
-            sessionStorage.setItem("pulse_fw_workspace", JSON.stringify(ws));
+            localStorage.setItem("pulse_fw_workspace", JSON.stringify(ws));
             const members = await fwReadFile(ws.fileIds.members, token);
             const existingMember = members.find(m => m.email === user.email);
             if (existingMember && existingMember.role) {
               // Already registered — check if gender is set
               const role = existingMember.role;
               setFwRole(role);
-              sessionStorage.setItem("pulse_fw_role", role);
+              localStorage.setItem("pulse_fw_role", role);
               // Update their profile info
               const updated = members.map(m => m.email === user.email ? { ...m, name: user.name, photo: user.photo } : m);
               await fwWriteFile(ws.fileIds.members, updated, token);
@@ -2791,7 +2791,7 @@ export default function PulseApp() {
               if (alreadyIn) {
                 // Returning user
                 setFwRole("head");
-                sessionStorage.setItem("pulse_fw_role", "head");
+                localStorage.setItem("pulse_fw_role", "head");
                 setFwMembers(members);
                 if (!alreadyIn.gender) {
                   setOnboardingStep("gender");
@@ -2968,7 +2968,7 @@ export default function PulseApp() {
 
   // Sign out of Family Workspace
   function fwSignOut() {
-    ["pulse_fw_user","pulse_fw_token","pulse_fw_role","pulse_fw_workspace"].forEach(k => sessionStorage.removeItem(k));
+    ["pulse_fw_user","pulse_fw_token","pulse_fw_role","pulse_fw_workspace"].forEach(k => localStorage.removeItem(k));
     setFwUser(null); setFwToken(null); setFwRole(null); setFwWorkspace(null); setFwMembers([]);
     setOnboardingStep("splash");
   }
@@ -2982,10 +2982,10 @@ export default function PulseApp() {
       if (!ws) {
         ws = await fwInitWorkspace(fwToken);
         setFwWorkspace(ws);
-        sessionStorage.setItem("pulse_fw_workspace", JSON.stringify(ws));
+        localStorage.setItem("pulse_fw_workspace", JSON.stringify(ws));
       }
       setFwRole(role);
-      sessionStorage.setItem("pulse_fw_role", role);
+      localStorage.setItem("pulse_fw_role", role);
       // Add self to members
       const members = await fwReadFile(ws.fileIds.members, fwToken);
       const alreadyIn = members.some(m => m.email === fwUser.email);
@@ -6540,7 +6540,7 @@ export default function PulseApp() {
                   if (field === "name") {
                     const u = {...fwUser, name: value};
                     setFwUser(u);
-                    sessionStorage.setItem("pulse_fw_user", JSON.stringify(u));
+                    localStorage.setItem("pulse_fw_user", JSON.stringify(u));
                   }
                 }
 
