@@ -1112,11 +1112,11 @@ export default function PulseApp() {
   const [userCoords, setUserCoords] = useState(null);
 
   // ─── GROCERY STATE ────────────────────────────────────────
-  const [groceryItems, setGroceryItems] = useState([]);
+  const [groceryItems, setGroceryItems] = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_grocery_items") || "[]"); } catch { return []; } });
   const [groceryInput, setGroceryInput] = useState("");
   const [groceryLoading, setGroceryLoading] = useState(false);
   const [groceryStore, setGroceryStore] = useState("all");
-  const [groceryStores, setGroceryStores] = useState(GROCERY_STORES_DEFAULT);
+  const [groceryStores, setGroceryStores] = useState(() => { try { const s = localStorage.getItem("pulse_grocery_stores"); return s ? JSON.parse(s) : GROCERY_STORES_DEFAULT; } catch { return GROCERY_STORES_DEFAULT; } });
   const [showAddStore, setShowAddStore]   = useState(false);
   const [newStoreInput, setNewStoreInput] = useState("");
   // ─── GROCERY Google Drive-backed functions ────────────────────────────────────────
@@ -1161,11 +1161,13 @@ export default function PulseApp() {
       if (fwWorkspace?.fileIds?.grocery && fwToken) {
         const all = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
         const meta = all.find(i => i.__type === "stores_meta");
-        if (meta?.stores?.length) setGroceryStores(meta.stores);
+        if (meta?.stores?.length) { setGroceryStores(meta.stores); localStorage.setItem("pulse_grocery_stores", JSON.stringify(meta.stores)); }
         const items = all.filter(i => !i.__type).sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
         setGroceryItems(items);
+        localStorage.setItem("pulse_grocery_items", JSON.stringify(items));
       } else {
-        setGroceryItems([]);
+        const saved = localStorage.getItem("pulse_grocery_items");
+        setGroceryItems(saved ? JSON.parse(saved) : []);
       }
     } catch(e) { setGroceryItems([]); }
     setGroceryLoading(false);
@@ -1177,7 +1179,7 @@ export default function PulseApp() {
     setGroceryInput("");
     const addedBy = fwUser?.name || "Family";
     const item = { id: "g_" + Date.now(), text, done: false, store: groceryStore === "all" ? "Walmart" : groceryStore, createdAt: Date.now(), addedBy, assignedTo: "" };
-    setGroceryItems(prev => [item, ...prev]);
+    setGroceryItems(prev => { const updated = [item, ...prev]; localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.grocery && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
       const filtered = Array.isArray(current) ? current.filter(i => !i.__type) : [];
@@ -1204,7 +1206,7 @@ export default function PulseApp() {
   }
 
   async function clearDoneItems() {
-    setGroceryItems(prev => prev.filter(i => !i.done));
+    setGroceryItems(prev => { const updated = prev.filter(i => !i.done); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.grocery && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
       await fwWriteFile(fwWorkspace.fileIds.grocery, (Array.isArray(current) ? current : []).filter(i => i.done !== true), fwToken);
@@ -1439,7 +1441,7 @@ export default function PulseApp() {
   }
 
   // ─── TODO STATE ────────────────────────────────────────
-  const [todoItems, setTodoItems]     = useState([]);
+  const [todoItems, setTodoItems]     = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_todo_items") || "[]"); } catch { return []; } });
   const [todoInput, setTodoInput]     = useState("");
   const [todoLoading, setTodoLoading] = useState(false);
   const [todoAssignee, setTodoAssignee] = useState("all");
@@ -1486,7 +1488,11 @@ export default function PulseApp() {
         const items = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
         const sorted = (Array.isArray(items) ? items : []).sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
         setTodoItems(sorted);
-      } else { setTodoItems([]); }
+        localStorage.setItem("pulse_todo_items", JSON.stringify(sorted));
+      } else {
+        const saved = localStorage.getItem("pulse_todo_items");
+        setTodoItems(saved ? JSON.parse(saved) : []);
+      }
     } catch(e) { setTodoItems([]); }
     setTodoLoading(false);
   }
@@ -1514,7 +1520,7 @@ export default function PulseApp() {
   }
 
   async function deleteTodo(id) {
-    setTodoItems(prev => prev.filter(i => i.id !== id));
+    setTodoItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_todo_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.todos && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
       await fwWriteFile(fwWorkspace.fileIds.todos, (Array.isArray(current) ? current : []).filter(i => i.id !== id), fwToken);
@@ -1762,7 +1768,7 @@ export default function PulseApp() {
       setResvItems(prev => { snapshot = prev; return prev; });
     }
   }
-  const [resvItems, setResvItems]       = useState([]);
+  const [resvItems, setResvItems]       = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_resv_items") || "[]"); } catch { return []; } });
   const [resvLoading, setResvLoading]   = useState(false);
   const [showResvForm, setShowResvForm] = useState(false);
   const [resvForm, setResvForm]         = useState({ type:"", name:"", date:"", time:"", partySize:"", confirmNo:"", address:"", notes:"", assignedTo:"" });
@@ -1810,8 +1816,9 @@ export default function PulseApp() {
         const items = allItems.filter(i => i.name && validTypes.includes(i.type));
         items.sort((a, b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time));
         setResvItems(items);
-      } else { setResvItems([]); }
-    } catch(e) { setResvItems([]); }
+        localStorage.setItem("pulse_resv_items", JSON.stringify(items));
+      } else { setResvItems([]); localStorage.removeItem("pulse_resv_items"); }
+    } catch(e) { try { const s=localStorage.getItem("pulse_resv_items"); setResvItems(s ? JSON.parse(s) : []); } catch { setResvItems([]); } }
     setResvLoading(false);
   }
 
@@ -1819,19 +1826,19 @@ export default function PulseApp() {
     if (!resvForm.name || !resvForm.date) return;
     const item = { ...resvForm, past: false, createdAt: Date.now() };
     const tempId = "temp_" + Date.now();
-    setResvItems(prev => [...prev, { id: tempId, ...item }].sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time)));
+    setResvItems(prev => { const updated = [...prev, { id: tempId, ...item }].sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time)); localStorage.setItem("pulse_resv_items", JSON.stringify(updated)); return updated; });
     setShowResvForm(false);
     setResvForm({ type:"", name:"", date:"", time:"", partySize:"", confirmNo:"", address:"", notes:"", assignedTo:"" });
     try {
       const res = await fetch(`${RESV_URL}.json`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(item) });
       const data = await res.json();
-      setResvItems(prev => prev.map(i => i.id === tempId ? { ...i, id: data.name } : i));
+      setResvItems(prev => { const updated = prev.map(i => i.id === tempId ? { ...i, id: data.name } : i); localStorage.setItem("pulse_resv_items", JSON.stringify(updated)); return updated; });
     } catch(e) {}
   }
 
   async function deleteResv(id) {
     if (!id) return;
-    setResvItems(prev => prev.filter(i => i.id !== id));
+    setResvItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_resv_items", JSON.stringify(updated)); return updated; });
     try { await fetch(`${RESV_URL}/${encodeURIComponent(id)}.json`, { method:"DELETE" }); } catch(e) {}
   }
 
@@ -1842,7 +1849,7 @@ export default function PulseApp() {
   }
 
   // ─── CLOTHING STATE ────────────────────────────────────────
-  const [clothingItems, setClothingItems]   = useState([]);
+  const [clothingItems, setClothingItems]   = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_clothing_items") || "[]"); } catch { return []; } });
   const [clothingInput, setClothingInput]   = useState("");
   const [clothingLoading, setClothingLoading] = useState(false);
   const [clothingMember, setClothingMember] = useState("all");
@@ -2423,9 +2430,15 @@ export default function PulseApp() {
       const res = await fetch(`${CLOTHING_URL}.json`);
       const data = await res.json();
       if (data) {
-        setClothingItems(Object.entries(data).map(([id, val]) => ({ id, ...val })));
-      } else { setClothingItems([]); }
-    } catch(e) { setClothingItems([]); }
+        const items = Object.entries(data).map(([id, val]) => ({ id, ...val }));
+        setClothingItems(items);
+        localStorage.setItem("pulse_clothing_items", JSON.stringify(items));
+      } else { setClothingItems([]); localStorage.removeItem("pulse_clothing_items"); }
+    } catch(e) {
+      const saved = localStorage.getItem("pulse_clothing_items");
+      if (saved) setClothingItems(JSON.parse(saved));
+      else setClothingItems([]);
+    }
     setClothingLoading(false);
   }
 
@@ -2435,7 +2448,7 @@ export default function PulseApp() {
     setClothingInput("");
     const item = { text, purchased: false, member: clothingMember === "all" ? "Family" : clothingMember, category: clothingCategory === "all" ? "Other" : clothingCategory, createdAt: Date.now() };
     const tempId = "temp_" + Date.now();
-    setClothingItems(prev => [{ id: tempId, ...item }, ...prev]);
+    setClothingItems(prev => { const updated = [{ id: tempId, ...item }, ...prev]; localStorage.setItem("pulse_clothing_items", JSON.stringify(updated)); return updated; });
     try {
       const res = await fetch(`${CLOTHING_URL}.json`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(item) });
       const data = await res.json();
@@ -2445,13 +2458,13 @@ export default function PulseApp() {
 
   async function toggleClothing(id, purchased) {
     if (!id) return;
-    setClothingItems(prev => prev.map(i => i.id === id ? { ...i, purchased: !purchased } : i));
+    setClothingItems(prev => { const updated = prev.map(i => i.id === id ? { ...i, purchased: !purchased } : i); localStorage.setItem("pulse_clothing_items", JSON.stringify(updated)); return updated; });
     try { await fetch(`${CLOTHING_URL}/${encodeURIComponent(id)}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ purchased: !purchased }) }); } catch(e) {}
   }
 
   async function deleteClothingItem(id) {
     if (!id) return;
-    setClothingItems(prev => prev.filter(i => i.id !== id));
+    setClothingItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_clothing_items", JSON.stringify(updated)); return updated; });
     try { await fetch(`${CLOTHING_URL}/${encodeURIComponent(id)}.json`, { method:"DELETE" }); } catch(e) {}
   }
 
