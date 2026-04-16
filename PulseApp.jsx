@@ -1157,19 +1157,29 @@ export default function PulseApp() {
 
   async function loadGrocery() {
     setGroceryLoading(true);
+    // Always load from localStorage first so UI shows data immediately
+    const cachedItems = localStorage.getItem("pulse_grocery_items");
+    const cachedStores = localStorage.getItem("pulse_grocery_stores");
+    if (cachedItems) { try { setGroceryItems(JSON.parse(cachedItems)); } catch(e) {} }
+    if (cachedStores) { try { setGroceryStores(JSON.parse(cachedStores)); } catch(e) {} }
     try {
       if (fwWorkspace?.fileIds?.grocery && fwToken) {
         const all = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
+        if (all === null) {
+          // Token expired or network error — keep localStorage data, do not wipe
+          setGroceryLoading(false);
+          return;
+        }
         const meta = all.find(i => i.__type === "stores_meta");
         if (meta?.stores?.length) { setGroceryStores(meta.stores); localStorage.setItem("pulse_grocery_stores", JSON.stringify(meta.stores)); }
         const items = all.filter(i => !i.__type).sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
-        setGroceryItems(items);
-        localStorage.setItem("pulse_grocery_items", JSON.stringify(items));
-      } else {
-        const saved = localStorage.getItem("pulse_grocery_items");
-        setGroceryItems(saved ? JSON.parse(saved) : []);
+        // Only update if Drive has data, or if localStorage is also empty
+        if (items.length > 0 || !cachedItems) {
+          setGroceryItems(items);
+          localStorage.setItem("pulse_grocery_items", JSON.stringify(items));
+        }
       }
-    } catch(e) { setGroceryItems([]); }
+    } catch(e) { /* keep cached data on error */ }
     setGroceryLoading(false);
   }
 
@@ -1182,6 +1192,7 @@ export default function PulseApp() {
     setGroceryItems(prev => { const updated = [item, ...prev]; localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.grocery && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
+      if (current === null) return; // token expired — localStorage already updated
       const filtered = Array.isArray(current) ? current.filter(i => !i.__type) : [];
       const meta = Array.isArray(current) ? current.filter(i => i.__type) : [];
       await fwWriteFile(fwWorkspace.fileIds.grocery, [item, ...filtered, ...meta], fwToken);
@@ -1189,18 +1200,20 @@ export default function PulseApp() {
   }
 
   async function toggleGroceryItem(id, done) {
-    setGroceryItems(prev => prev.map(i => i.id === id ? { ...i, done: !done } : i));
+    setGroceryItems(prev => { const updated = prev.map(i => i.id === id ? { ...i, done: !done } : i); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.grocery && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
+      if (current === null) return; // token expired — localStorage already updated
       const updated = (Array.isArray(current) ? current : []).map(i => i.id === id ? { ...i, done: !done } : i);
       await fwWriteFile(fwWorkspace.fileIds.grocery, updated, fwToken);
     }
   }
 
   async function deleteGroceryItem(id) {
-    setGroceryItems(prev => prev.filter(i => i.id !== id));
+    setGroceryItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.grocery && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
+      if (current === null) return; // token expired — localStorage already updated
       await fwWriteFile(fwWorkspace.fileIds.grocery, (Array.isArray(current) ? current : []).filter(i => i.id !== id), fwToken);
     }
   }
@@ -1483,17 +1496,19 @@ export default function PulseApp() {
 
   async function loadTodos() {
     setTodoLoading(true);
+    const cachedTodos = localStorage.getItem("pulse_todo_items");
+    if (cachedTodos) { try { setTodoItems(JSON.parse(cachedTodos)); } catch(e) {} }
     try {
       if (fwWorkspace?.fileIds?.todos && fwToken) {
         const items = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
+        if (items === null) { setTodoLoading(false); return; } // token expired — keep cache
         const sorted = (Array.isArray(items) ? items : []).sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
-        setTodoItems(sorted);
-        localStorage.setItem("pulse_todo_items", JSON.stringify(sorted));
-      } else {
-        const saved = localStorage.getItem("pulse_todo_items");
-        setTodoItems(saved ? JSON.parse(saved) : []);
+        if (sorted.length > 0 || !cachedTodos) {
+          setTodoItems(sorted);
+          localStorage.setItem("pulse_todo_items", JSON.stringify(sorted));
+        }
       }
-    } catch(e) { setTodoItems([]); }
+    } catch(e) { /* keep cached data on error */ }
     setTodoLoading(false);
   }
 
@@ -1504,17 +1519,19 @@ export default function PulseApp() {
     const due = todoDueDate;
     setTodoDueDate("");
     const item = { id: "t_" + Date.now(), text, done:false, priority: todoPriority, assignee: todoAssignee === "all" ? "Family" : todoAssignee, dueDate: due, createdAt: Date.now(), addedBy: fwUser?.name || "Family" };
-    setTodoItems(prev => [item, ...prev]);
+    setTodoItems(prev => { const updated = [item, ...prev]; localStorage.setItem("pulse_todo_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.todos && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
+      if (current === null) return; // token expired
       await fwWriteFile(fwWorkspace.fileIds.todos, [item, ...(Array.isArray(current) ? current : [])], fwToken);
     }
   }
 
   async function toggleTodo(id, done) {
-    setTodoItems(prev => prev.map(i => i.id === id ? { ...i, done: !done } : i));
+    setTodoItems(prev => { const updated = prev.map(i => i.id === id ? { ...i, done: !done } : i); localStorage.setItem("pulse_todo_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.todos && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
+      if (current === null) return; // token expired
       await fwWriteFile(fwWorkspace.fileIds.todos, (Array.isArray(current) ? current : []).map(i => i.id === id ? { ...i, done: !done } : i), fwToken);
     }
   }
@@ -1523,6 +1540,7 @@ export default function PulseApp() {
     setTodoItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_todo_items", JSON.stringify(updated)); return updated; });
     if (fwWorkspace?.fileIds?.todos && fwToken) {
       const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
+      if (current === null) return;
       await fwWriteFile(fwWorkspace.fileIds.todos, (Array.isArray(current) ? current : []).filter(i => i.id !== id), fwToken);
     }
   }
@@ -2713,10 +2731,11 @@ export default function PulseApp() {
       const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
         headers:{ Authorization:`Bearer ${token}` }
       });
+      if (res.status === 401 || res.status === 403) return null; // token expired — signal caller
       if (!res.ok) return [];
       const text = await res.text();
       return JSON.parse(text || "[]");
-    } catch { return []; }
+    } catch { return null; } // network error — signal caller to use cache
   }
 
   // Write a JSON array to a Drive file
