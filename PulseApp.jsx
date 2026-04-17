@@ -735,22 +735,54 @@ export default function PulseApp() {
         // Indian languages to filter by — only show movies originally made in these languages
         const INDIAN_LANGS = ["hi","te","ta","ml","kn","bn","mr","pa","gu","or","as","ur"];
         // Fetch 3 pages per platform per language in parallel — gives a rich list of Indian movies only
+        // Date filters: last 12 months for new releases, last 3 years for popular catalog
+        const _now = new Date();
+        const _recentDate = new Date(_now); _recentDate.setMonth(_now.getMonth() - 12);
+        const _recentDateStr = _recentDate.toISOString().slice(0, 10);
+        const _olderDate = new Date(_now); _olderDate.setFullYear(_now.getFullYear() - 3);
+        const _olderDateStr = _olderDate.toISOString().slice(0, 10);
         const perPlatform = await Promise.all(IN_PLATFORMS.map(async (pl) => {
           try {
-            // Fetch for each Indian language to ensure only Indian-origin movies
-            const langResults = await Promise.all(INDIAN_LANGS.slice(0, 5).map(lang =>
+            // Fetch RECENT releases (last 12 months) sorted by release date DESC — catches new movies first
+            const recentResults = await Promise.all(INDIAN_LANGS.slice(0, 5).map(lang =>
               Promise.all([1, 2].map(page =>
                 fetch(
                   `${TMDB_BASE}/discover/movie?api_key=${TMDB_API_KEY}` +
                   `&with_watch_providers=${pl.id}&watch_region=IN` +
                   `&with_original_language=${lang}` +
+                  `&primary_release_date.gte=${_recentDateStr}` +
+                  `&sort_by=primary_release_date.desc&page=${page}`
+                ).then(r => r.ok ? r.json() : {}).then(d => d.results || [])
+              )).then(pages => pages.flat())
+            ));
+            // Also fetch popular movies from last 3 years — fills in well-known titles
+            const popularResults = await Promise.all(INDIAN_LANGS.slice(0, 5).map(lang =>
+              Promise.all([1, 2].map(page =>
+                fetch(
+                  `${TMDB_BASE}/discover/movie?api_key=${TMDB_API_KEY}` +
+                  `&with_watch_providers=${pl.id}&watch_region=IN` +
+                  `&with_original_language=${lang}` +
+                  `&primary_release_date.gte=${_olderDateStr}` +
                   `&sort_by=popularity.desc&page=${page}`
                 ).then(r => r.ok ? r.json() : {}).then(d => d.results || [])
               )).then(pages => pages.flat())
             ));
-            const allResults = langResults.flat();
-            // Sort by popularity and deduplicate
-            allResults.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            // Merge: recent releases FIRST, then popular — deduplicate by id
+            const _seen = new Set();
+            const allResults = [...recentResults.flat(), ...popularResults.flat()].filter(m => {
+              if (_seen.has(m.id)) return false;
+              _seen.add(m.id);
+              return true;
+            });
+            // Keep recent releases at top, sort the rest by popularity
+            const recentIds = new Set(recentResults.flat().map(m => m.id));
+            allResults.sort((a, b) => {
+              const aRecent = recentIds.has(a.id), bRecent = recentIds.has(b.id);
+              if (aRecent && !bRecent) return -1;
+              if (!aRecent && bRecent) return 1;
+              if (aRecent && bRecent) return new Date(b.release_date||0) - new Date(a.release_date||0);
+              return (b.popularity || 0) - (a.popularity || 0);
+            });
             return allResults.map(m => ({
               m,
               pInfo: {
@@ -783,7 +815,7 @@ export default function PulseApp() {
             id: m.id, title: m.title || m.name,
             platform, genre: genres.slice(0,2).join(" · ") || "Drama",
             rating: m.vote_average?.toFixed(1) || "N/A",
-            duration: "", badge: i < 6 ? "TOP 10" : "NEW",
+            duration: "", badge: m.release_date && (new Date() - new Date(m.release_date)) < 60*24*60*60*1000 ? "🆕 NEW" : i < 6 ? "TOP 10" : "NEW",
             color, emoji: genreEmoji(genres), released,
             desc: m.overview || "",
             poster: m.poster_path ? `${TMDB_IMG}${m.poster_path}` : null,
