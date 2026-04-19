@@ -1489,6 +1489,10 @@ export default function PulseApp() {
   const [todoItems, setTodoItems]     = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_todo_items") || "[]"); } catch { return []; } });
   const [todoInput, setTodoInput]     = useState("");
   const [todoLoading, setTodoLoading] = useState(false);
+  const [editingTodoId, setEditingTodoId] = useState(null);
+  const [editTodoText, setEditTodoText] = useState("");
+  const [editTodoPriority, setEditTodoPriority] = useState("medium");
+  const [editTodoDueDate, setEditTodoDueDate] = useState("");
   const [todoAssignee, setTodoAssignee] = useState("all");
   const TODO_PRIORITIES = [
     { id:"high",   label:"🔍´ High",   color:"#FF3B5C" },
@@ -1574,6 +1578,21 @@ export default function PulseApp() {
       const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
       if (current === null) return;
       await fwWriteFile(fwWorkspace.fileIds.todos, (Array.isArray(current) ? current : []).filter(i => i.id !== id), fwToken);
+    }
+  }
+  async function updateTodo(id, newText, newPriority, newDueDate) {
+    const text = newText.trim();
+    if (!text) return;
+    setEditingTodoId(null);
+    setTodoItems(prev => {
+      const updated = prev.map(i => i.id === id ? { ...i, text, priority: newPriority, dueDate: newDueDate } : i);
+      localStorage.setItem("pulse_todo_items", JSON.stringify(updated));
+      return updated;
+    });
+    if (fwWorkspace?.fileIds?.todos && fwToken) {
+      const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
+      if (current === null) return;
+      await fwWriteFile(fwWorkspace.fileIds.todos, (Array.isArray(current) ? current : []).map(i => i.id === id ? { ...i, text, priority: newPriority, dueDate: newDueDate } : i), fwToken);
     }
   }
 
@@ -4820,18 +4839,35 @@ export default function PulseApp() {
                       const dueDateLabel = isOverdue?"⚠️ Overdue":isDueToday?"🔥 Due today":isDueSoon?"⏰ Due tomorrow":t.dueDate?`📅 ${new Date(t.dueDate+"T12:00:00").toLocaleDateString([],{month:"short",day:"numeric"})}`:null;
                       return (
                         <div key={t.id} style={{background:T.bgCard,borderRadius:16,padding:"13px 14px",marginBottom:8,border:`1px solid ${isOverdue?"rgba(255,59,92,0.4)":T.border}`,borderLeft:`3px solid ${isOverdue?"#FF3B5C":pr.color}`,animation:`slideUp 0.25s ease ${i*0.04}s both`}}>
-                          <div style={{display:"flex",alignItems:"center",gap:12}}>
-                            <div onClick={()=>toggleTodo(t.id,t.done)} style={{width:24,height:24,borderRadius:8,border:`2px solid ${pr.color}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,background:"transparent"}}/>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:3}}>{t.text}</div>
-                              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                                <span style={{fontSize:9,fontWeight:700,color:pr.color}}>{pr.label}</span>
-                                <span style={{fontSize:11,color:T.textFaint}}>👤 {t.assignee||"Family"}</span>
-                                {dueDateLabel && <span style={{fontSize:9,fontWeight:700,color:dueDateColor}}>{dueDateLabel}</span>}
+                          {editingTodoId === t.id ? (
+                            <div>
+                              <input autoFocus value={editTodoText} onChange={e=>setEditTodoText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")updateTodo(t.id,editTodoText,editTodoPriority,editTodoDueDate);if(e.key==="Escape")setEditingTodoId(null);}} style={{width:"100%",background:isDark?"rgba(255,255,255,0.07)":"rgba(255,255,255,0.9)",border:"1px solid #A855F7",borderRadius:10,padding:"8px 12px",fontSize:14,color:T.text,outline:"none",fontFamily:"inherit",boxSizing:"border-box",marginBottom:8}}/>
+                              <div style={{display:"flex",gap:6,marginBottom:8}}>
+                                {TODO_PRIORITIES.map(p=>(
+                                  <div key={p.id} onClick={()=>setEditTodoPriority(p.id)} style={{flex:1,padding:"6px 4px",borderRadius:10,cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"center",background:editTodoPriority===p.id?p.color:(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:editTodoPriority===p.id?"#fff":T.textMuted,transition:"all 0.15s"}}>{p.label}</div>
+                                ))}
+                              </div>
+                              <input type="date" value={editTodoDueDate} onChange={e=>setEditTodoDueDate(e.target.value)} style={{width:"100%",background:isDark?"rgba(255,255,255,0.07)":"rgba(255,255,255,0.9)",border:`1px solid ${editTodoDueDate?"#A855F7":"rgba(168,85,247,0.3)"}`,borderRadius:10,padding:"8px 12px",fontSize:14,color:T.text,outline:"none",fontFamily:"inherit",boxSizing:"border-box",marginBottom:8}}/>
+                              <div style={{display:"flex",gap:8}}>
+                                <div onClick={()=>updateTodo(t.id,editTodoText,editTodoPriority,editTodoDueDate)} style={{flex:1,background:"#A855F7",borderRadius:10,padding:"10px",textAlign:"center",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff"}}>✔ Save</div>
+                                <div onClick={()=>setEditingTodoId(null)} style={{flex:1,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.06)",borderRadius:10,padding:"10px",textAlign:"center",cursor:"pointer",fontSize:13,fontWeight:700,color:T.textMuted}}>✕ Cancel</div>
                               </div>
                             </div>
-                            <div onClick={()=>deleteTodo(t.id)} style={{fontSize:16,cursor:"pointer",color:T.textFaint,padding:"4px",flexShrink:0}}>❌</div>
-                          </div>
+                          ) : (
+                            <div style={{display:"flex",alignItems:"center",gap:12}}>
+                              <div onClick={()=>toggleTodo(t.id,t.done)} style={{width:24,height:24,borderRadius:8,border:`2px solid ${pr.color}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,background:"transparent"}}/>
+                              <div style={{flex:1,minWidth:0}} onClick={()=>{setEditingTodoId(t.id);setEditTodoText(t.text);setEditTodoPriority(t.priority||"medium");setEditTodoDueDate(t.dueDate||"");}}>
+                                <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:3}}>{t.text}</div>
+                                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                                  <span style={{fontSize:9,fontWeight:700,color:pr.color}}>{pr.label}</span>
+                                  <span style={{fontSize:11,color:T.textFaint}}>👤 {t.assignee||"Family"}</span>
+                                  {dueDateLabel && <span style={{fontSize:9,fontWeight:700,color:dueDateColor}}>{dueDateLabel}</span>}
+                                </div>
+                              </div>
+                              <div onClick={()=>{setEditingTodoId(t.id);setEditTodoText(t.text);setEditTodoPriority(t.priority||"medium");setEditTodoDueDate(t.dueDate||"");}} style={{fontSize:15,cursor:"pointer",color:"#A855F7",padding:"4px 6px",flexShrink:0}} title="Edit task">✏️</div>
+                              <div onClick={()=>deleteTodo(t.id)} style={{fontSize:16,cursor:"pointer",color:T.textFaint,padding:"4px",flexShrink:0}}>❌</div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
