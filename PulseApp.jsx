@@ -1490,6 +1490,7 @@ export default function PulseApp() {
   const [todoInput, setTodoInput]     = useState("");
   const [todoLoading, setTodoLoading] = useState(false);
   const [editingTodoId, setEditingTodoId] = useState(null);
+  const [showAddTodo, setShowAddTodo] = useState(false);
   const [editTodoText, setEditTodoText] = useState("");
   const [editTodoPriority, setEditTodoPriority] = useState("medium");
   const [editTodoDueDate, setEditTodoDueDate] = useState("");
@@ -4761,9 +4762,14 @@ export default function PulseApp() {
                   <h2 style={{fontSize:22,fontWeight:900,color:T.text,fontFamily:"Georgia,serif",letterSpacing:"-0.02em",margin:0}}>✅ To-Do</h2>
                   <div style={{fontSize:11,color:T.textFaint,marginTop:2}}>{todoItems.filter(t=>!t.done).length} pending · {todoItems.filter(t=>t.done).length} done</div>
                 </div>
-                {todoItems.some(t=>t.done) && (
-                  <div onClick={async()=>{const done=todoItems.filter(t=>t.done);setTodoItems(p=>p.filter(t=>!t.done));try{await Promise.all(done.map(t=>fetch(`${TODO_URL}/${t.id}.json`,{method:"DELETE"})));}catch(e){}}} style={{fontSize:11,fontWeight:700,color:"#FF3B5C",cursor:"pointer",background:"rgba(255,59,92,0.1)",padding:"6px 12px",borderRadius:20}}>Clear Done</div>
-                )}
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  {todoItems.some(t=>t.done) && (
+                    <div onClick={async()=>{const done=todoItems.filter(t=>t.done);setTodoItems(p=>p.filter(t=>!t.done));try{await Promise.all(done.map(t=>fetch(`${TODO_URL}/${t.id}.json`,{method:"DELETE"})));}catch(e){}}} style={{fontSize:11,fontWeight:700,color:"#FF3B5C",cursor:"pointer",background:"rgba(255,59,92,0.1)",padding:"6px 12px",borderRadius:20}}>Clear Done</div>
+                  )}
+                  <div onClick={()=>{setShowAddTodo(p=>!p);setTodoInput("");setTodoDueDate("");setTodoPriority("medium");}} style={{width:36,height:36,borderRadius:18,background:showAddTodo?"#A855F7":"rgba(168,85,247,0.15)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,transition:"all 0.2s"}} title={showAddTodo?"Close":"Add Task"}>
+                    <span style={{fontSize:22,color:showAddTodo?"#fff":"#A855F7",fontWeight:300,lineHeight:1,marginTop:showAddTodo?1:-1}}>{showAddTodo?"×":"+"}</span>
+                  </div>
+                </div>
               </div>
 
               {/* Assignee filter */}
@@ -4779,7 +4785,8 @@ export default function PulseApp() {
               </div>
 
               {/* Add input */}
-              <div style={{background:isDark?"rgba(168,85,247,0.1)":"rgba(168,85,247,0.07)",border:"1px solid rgba(168,85,247,0.25)",borderRadius:16,padding:"12px 14px"}}>
+              {showAddTodo && (
+              <div style={{background:isDark?"rgba(168,85,247,0.1)":"rgba(168,85,247,0.07)",border:"1px solid rgba(168,85,247,0.25)",borderRadius:16,padding:"12px 14px",marginBottom:10}}>
                 {/* Notification status */}
                 {notifPermission !== "granted" && (
                   <div onClick={()=>typeof Notification!=="undefined"&&Notification.requestPermission().then(p=>setNotifPermission(p))} style={{display:"flex",alignItems:"center",gap:6,background:"rgba(168,85,247,0.15)",borderRadius:10,padding:"6px 10px",marginBottom:10,cursor:"pointer"}}>
@@ -4807,10 +4814,11 @@ export default function PulseApp() {
                     </div>
                   )}
                 </div>
-                <div onClick={addTodo} style={{background: todoInput.trim()?"#A855F7":"rgba(168,85,247,0.25)",borderRadius:14,padding:"14px",textAlign:"center",cursor: todoInput.trim()?"pointer":"default",fontSize:14,fontWeight:800,color: todoInput.trim()?"#fff":"rgba(168,85,247,0.5)",transition:"all 0.2s",minHeight:48}}>
+                <div onClick={()=>{addTodo();setShowAddTodo(false);}} style={{background: todoInput.trim()?"#A855F7":"rgba(168,85,247,0.25)",borderRadius:14,padding:"14px",textAlign:"center",cursor: todoInput.trim()?"pointer":"default",fontSize:14,fontWeight:800,color: todoInput.trim()?"#fff":"rgba(168,85,247,0.5)",transition:"all 0.2s",minHeight:48}}>
                   ➕ Add Task
                 </div>
               </div>
+              )}
             </div>
 
             <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px"}}>
