@@ -6043,7 +6043,7 @@ export default function PulseApp() {
                   {sfViewItem.type==="bank" ? (
                     <>
                       <div style={{textAlign:"center",marginBottom:16}}>
-                        <div style={{fontSize:40,marginBottom:8}}>{sfViewItem.country==="US"?"🇺🇸":"🇮🇳"} 🏦</div>
+                        <div style={{fontSize:40,marginBottom:8}}>{sfViewItem.country==="US"?"🇺🇸":"🇮🇳"}</div>
                         <div style={{fontSize:20,fontWeight:900,color:T.text}}>{sfViewItem.bankName}</div>
                         <div style={{fontSize:11,color:T.textFaint,marginTop:4}}>{sfViewItem.country==="US"?"US Bank Account":"Indian Bank Account"} · {sfViewItem.accType}</div>
                       </div>
