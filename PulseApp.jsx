@@ -1997,6 +1997,8 @@ export default function PulseApp() {
   const [sfNotes, setSfNotes] = useState("");
   const [sfBankCountry, setSfBankCountry] = useState("IN"); // "IN" | "US"
   const [sfRoutingNo, setSfRoutingNo] = useState("");
+  const [sfBankUserId, setSfBankUserId] = useState("");
+  const [sfBankPassword, setSfBankPassword] = useState("");
   const [sfSiteName, setSfSiteName] = useState("");
   const [sfUsername, setSfUsername] = useState("");
   const [sfPassword, setSfPassword] = useState("");
@@ -2158,6 +2160,8 @@ export default function PulseApp() {
         accHolder: sfAccHolder || fwUser?.name || "",
         accType: sfAccType,
         upi: sfBankCountry === "IN" ? sfUpi : "",
+        bankUserId: sfBankUserId,
+        bankPassword: sfBankPassword,
         notes: sfNotes,
         createdAt: sfEditId ? (sfItems.find(i=>i.id===sfEditId)?.createdAt || Date.now()) : Date.now(),
       };
@@ -2194,6 +2198,7 @@ export default function PulseApp() {
       setSfAccHolder(item.accHolder || ""); setSfAccType(item.accType || "Savings");
       setSfUpi(item.upi || ""); setSfNotes(item.notes || "");
       setSfBankCountry(item.country || "IN"); setSfRoutingNo(item.routingNo || "");
+      setSfBankUserId(item.bankUserId || ""); setSfBankPassword(item.bankPassword || "");
     } else {
       setSfSiteName(item.siteName); setSfUsername(item.username);
       setSfPassword(item.password || ""); setSfUrl(item.url || ""); setSfNotes(item.notes || "");
@@ -6048,7 +6053,7 @@ export default function PulseApp() {
                         <div style={{fontSize:11,color:T.textFaint,marginTop:4}}>{sfViewItem.country==="US"?"US Bank Account":"Indian Bank Account"} · {sfViewItem.accType}</div>
                       </div>
                       <div style={{background:isDark?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)",borderRadius:16,padding:"14px 16px",marginBottom:12}}>
-                        {[{label:"Account Holder",val:sfViewItem.accHolder},{label:"Account Number",val:sfViewItem.accNo,mono:true,sensitive:true},{label:sfViewItem.country==="US"?"Routing Number":"IFSC Code",val:sfViewItem.country==="US"?sfViewItem.routingNo:sfViewItem.ifsc,mono:true},{label:"Account Type",val:sfViewItem.accType},...((!sfViewItem.country||sfViewItem.country==="IN")&&sfViewItem.upi?[{label:"UPI ID",val:sfViewItem.upi}]:[]),...(sfViewItem.notes?[{label:"Notes",val:sfViewItem.notes,italic:true}]:[])].filter(r=>r.val).map((row,i)=>(
+                        {[{label:"Account Holder",val:sfViewItem.accHolder},{label:"Account Number",val:sfViewItem.accNo,mono:true,sensitive:true},{label:sfViewItem.country==="US"?"Routing Number":"IFSC Code",val:sfViewItem.country==="US"?sfViewItem.routingNo:sfViewItem.ifsc,mono:true},{label:"Account Type",val:sfViewItem.accType},...((!sfViewItem.country||sfViewItem.country==="IN")&&sfViewItem.upi?[{label:"UPI ID",val:sfViewItem.upi}]:[]),...(sfViewItem.bankUserId?[{label:"User ID / Login",val:sfViewItem.bankUserId}]:[]),...(sfViewItem.bankPassword?[{label:"Online Password",val:sfViewItem.bankPassword,sensitive:true}]:[]),...(sfViewItem.notes?[{label:"Notes",val:sfViewItem.notes,italic:true}]:[])].filter(r=>r.val).map((row,i)=>(
                           <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:i<5?`1px solid ${isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.06)"}`:`none`}}>
                             <div style={{fontSize:11,color:T.textFaint,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}}>{row.label}</div>
                             <div style={{fontSize:13,fontWeight:700,color:T.text,fontFamily:row.mono?"monospace":"inherit",letterSpacing:row.mono?1:0,fontStyle:row.italic?"italic":"normal",textAlign:"right",maxWidth:"60%",wordBreak:"break-all"}}>
@@ -6156,6 +6161,10 @@ export default function PulseApp() {
                     </>
                   )}
 
+                  <div style={{fontSize:11,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",fontWeight:700,marginBottom:6}}>User ID / Login (optional)</div>
+                  <input value={sfBankUserId} onChange={e=>setSfBankUserId(e.target.value)} placeholder="e.g. sudhakar123" style={{width:"100%",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:T.text,outline:"none",fontFamily:"inherit",marginBottom:12,boxSizing:"border-box"}}/>
+                  <div style={{fontSize:11,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",fontWeight:700,marginBottom:6}}>Online Banking Password (optional)</div>
+                  <input value={sfBankPassword} onChange={e=>setSfBankPassword(e.target.value)} placeholder="e.g. ••••••••" type="password" style={{width:"100%",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:T.text,outline:"none",fontFamily:"inherit",marginBottom:12,boxSizing:"border-box",letterSpacing:2}}/>
                   <div style={{fontSize:11,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",fontWeight:700,marginBottom:6}}>Notes (optional)</div>
                   <input value={sfNotes} onChange={e=>setSfNotes(e.target.value)} placeholder="Any additional info..." style={{width:"100%",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:T.text,outline:"none",fontFamily:"inherit",marginBottom:16,boxSizing:"border-box"}}/>
 
