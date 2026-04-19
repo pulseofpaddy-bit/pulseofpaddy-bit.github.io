@@ -1995,7 +1995,7 @@ export default function PulseApp() {
   const [sfAccType, setSfAccType] = useState("Savings");
   const [sfUpi, setSfUpi] = useState("");
   const [sfNotes, setSfNotes] = useState("");
-  const [sfBankCountry, setSfBankCountry] = useState("IN"); // "IN" | "US"
+  const [sfBankCountry, setSfBankCountry] = useState("US"); // "IN" | "US"
   const [sfRoutingNo, setSfRoutingNo] = useState("");
   const [sfBankUserId, setSfBankUserId] = useState("");
   const [sfBankPassword, setSfBankPassword] = useState("");
