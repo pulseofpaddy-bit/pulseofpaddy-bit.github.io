@@ -3056,29 +3056,37 @@ export default function PulseApp() {
     const email = fwInviteEmail.trim().toLowerCase();
     const name = fwInviteName.trim() || email.split("@")[0];
     const gender = fwInviteGender;
-    if (!email || !fwToken || !fwWorkspace) return;
+    if (!email || !email.includes("@") || !fwToken || !fwWorkspace) return;
     setFwInviteStatus("sending");
     try {
       // Share Drive folder (best-effort — don't block on failure)
-      await fwShareWorkspace(email, fwToken).catch(()=>{});
-      // Add to Members.json
-      const current = await fwReadFile(fwWorkspace.fileIds.members, fwToken);
-      const alreadyIn = current.some(m => m.email === email);
-      if (!alreadyIn) {
-        const updated = [...current, { name, email, gender, role:"member", joinedAt: Date.now() }];
-        await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken);
-        setFwMembers(updated);
+      await fwShareWorkspace(email, fwToken).catch(() => {});
+      // Add to Members.json — use cached fwMembers if Drive read fails
+      let current = await fwReadFile(fwWorkspace.fileIds.members, fwToken);
+      if (!current || !Array.isArray(current)) {
+        // Token expired or network error — fall back to in-memory state
+        current = fwMembers || [];
       }
-      // Send invite email with app link
-      await fwSendInviteEmail(email, name, fwToken);
+      const alreadyIn = current.some(m => m.email === email);
+      const updated = alreadyIn ? current : [...current, { name, email, gender, role: "member", joinedAt: Date.now() }];
+      if (!alreadyIn) {
+        // Try to write to Drive, but don't fail if it doesn't work
+        await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken).catch(() => {});
+        setFwMembers(updated);
+        // Also save to localStorage as backup
+        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
+      }
+      // Send invite email — completely independent, never blocks member add
+      fwSendInviteEmail(email, name, fwToken).catch(() => {});
       setFwInviteEmail("");
       setFwInviteName("");
       setFwInviteGender("");
       setFwInviteStatus("sent");
       setTimeout(() => { setFwInviteStatus(""); setFwShowInvite(false); }, 3000);
     } catch(e) {
+      console.error("fwInviteMember error:", e);
       setFwInviteStatus("error");
-      setTimeout(() => setFwInviteStatus(""), 3000);
+      setTimeout(() => setFwInviteStatus(""), 4000);
     }
   }
 
