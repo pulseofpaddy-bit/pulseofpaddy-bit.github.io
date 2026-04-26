@@ -3648,12 +3648,12 @@ export default function PulseApp() {
   const dateStr = time.toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"});
 
   return (
-    <div style={{width:"100%",minHeight:"100dvh",background:T.bg,fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",paddingTop:"env(safe-area-inset-top)",paddingBottom:"env(safe-area-inset-bottom)",paddingLeft:"env(safe-area-inset-left)",paddingRight:"env(safe-area-inset-right)",WebkitTapHighlightColor:"transparent",WebkitFontSmoothing:"antialiased",MozOsxFontSmoothing:"grayscale"}}>
+    <div style={{width:"100%",minHeight:"100dvh",minHeight:"-webkit-fill-available",background:T.bg,fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",paddingTop:"env(safe-area-inset-top)",paddingBottom:"env(safe-area-inset-bottom)",paddingLeft:"env(safe-area-inset-left)",paddingRight:"env(safe-area-inset-right)",WebkitTapHighlightColor:"transparent",WebkitFontSmoothing:"antialiased",MozOsxFontSmoothing:"grayscale"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
         html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
-        body{overscroll-behavior-y:none}
+        body{overscroll-behavior-y:none;overscroll-behavior-x:none;-webkit-overflow-scrolling:touch}input,textarea,select{font-size:16px!important}
         ::-webkit-scrollbar{width:0;display:none}
         input,button,select,textarea{font-family:inherit;-webkit-appearance:none;appearance:none}
         input:focus,select:focus,textarea:focus{outline:none}
@@ -4048,7 +4048,7 @@ export default function PulseApp() {
             </div>
 
             {/* Bottom Navigation Bar */}
-            <div style={{position:"fixed",bottom:0,left:0,right:0,background:isDark?"rgba(8,10,14,0.95)":"rgba(255,255,255,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:`1px solid ${isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.08)"}`,display:"flex",alignItems:"center",justifyContent:"space-around",padding:"8px 0 env(safe-area-inset-bottom,8px)",zIndex:100}}>
+            <div style={{position:"fixed",bottom:0,left:0,right:0,background:isDark?"rgba(8,10,14,0.95)":"rgba(255,255,255,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:`1px solid ${isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.08)"}`,display:"flex",alignItems:"center",justifyContent:"space-around",padding:"8px 0 max(env(safe-area-inset-bottom,8px),8px)",zIndex:100}}>
               {[
                 {key:null,label:"Home",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill={mainTab===null?(isDark?"#fff":"#000"):"none"} stroke={mainTab===null?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},
                 {key:"movies",label:"Movies",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={mainTab==="movies"?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>},
@@ -4493,7 +4493,7 @@ export default function PulseApp() {
             </div>
 
             {/* Items list */}
-            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px",WebkitOverflowScrolling:"touch"}}>
               {groceryLoading && (
                 <div style={{textAlign:"center",paddingTop:40}}>
                   <div style={{fontSize:32,marginBottom:8}}>🛒</div>
@@ -4683,7 +4683,7 @@ export default function PulseApp() {
             )}
 
             {/* Appointments list */}
-            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px",WebkitOverflowScrolling:"touch"}}>
               {apptLoading && (
                 <div style={{textAlign:"center",paddingTop:40}}>
                   <div style={{fontSize:32,marginBottom:8}}>🩺</div>
@@ -4826,7 +4826,7 @@ export default function PulseApp() {
               )}
             </div>
 
-            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px",WebkitOverflowScrolling:"touch"}}>
               {todoLoading && <div style={{textAlign:"center",paddingTop:40}}><div style={{fontSize:32,marginBottom:8}}>✅</div><div style={{fontSize:14,color:T.textFaint}}>Loading tasks…</div></div>}
               {!todoLoading && todoItems.length === 0 && (
                 <div style={{textAlign:"center",paddingTop:50}}>
@@ -4950,7 +4950,7 @@ export default function PulseApp() {
             {/* Add Reservation Form */}
             {showResvForm && (
               <div style={{position:"absolute",inset:0,zIndex:200,background:"rgba(0,0,0,0.6)",display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={()=>setShowResvForm(false)}>
-                <div style={{background:isDark?"#13151A":"#fff",borderRadius:"24px 24px 0 0",padding:"20px 18px 36px",border:`1px solid ${T.border}`,maxHeight:"85%",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+                <div style={{background:isDark?"#13151A":"#fff",borderRadius:"24px 24px 0 0",padding:"20px 18px max(36px,calc(36px + env(safe-area-inset-bottom,0px)))",border:`1px solid ${T.border}`,maxHeight:"85%",overflowY:"auto",WebkitOverflowScrolling:"touch"}} onClick={e=>e.stopPropagation()}>
                   <div style={{width:36,height:4,background:isDark?"rgba(255,255,255,0.2)":"rgba(0,0,0,0.15)",borderRadius:2,margin:"0 auto 16px"}}/>
                   <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:14}}>🗓️ New Reservation</div>
 
@@ -5009,7 +5009,7 @@ export default function PulseApp() {
             )}
 
             {/* List */}
-            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px",WebkitOverflowScrolling:"touch"}}>
 
               {resvLoading && <div style={{textAlign:"center",paddingTop:40}}><div style={{fontSize:32,marginBottom:8}}>🗓️</div><div style={{fontSize:14,color:T.textFaint}}>Loading reservations…</div></div>}
               {!resvLoading && resvItems.length === 0 && (
@@ -5167,7 +5167,7 @@ export default function PulseApp() {
               </div>
             </div>
 
-            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px",WebkitOverflowScrolling:"touch"}}>
               {clothingLoading && <div style={{textAlign:"center",paddingTop:40}}><div style={{fontSize:32,marginBottom:8}}>👔</div><div style={{fontSize:14,color:T.textFaint}}>Loading…</div></div>}
               {!clothingLoading && clothingItems.length === 0 && (
                 <div style={{textAlign:"center",paddingTop:50}}>
@@ -5830,7 +5830,7 @@ export default function PulseApp() {
             {/* Add/Edit Contact Modal */}
             {ctShowAdd && (
               <div style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>{setCtShowAdd(false);setCtEditId(null);}}>
-                <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:T.bg,borderRadius:"24px 24px 0 0",padding:"20px 20px 40px",maxHeight:"85vh",overflowY:"auto"}}>
+                <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:T.bg,borderRadius:"24px 24px 0 0",padding:"20px 20px max(40px,calc(40px + env(safe-area-inset-bottom,0px)))",maxHeight:"85vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
                   <div style={{width:40,height:4,borderRadius:2,background:T.border,margin:"0 auto 16px"}}/>
                   <h2 style={{fontSize:20,fontWeight:900,color:T.text,margin:"0 0 14px"}}>{ctEditId ? "Edit Contact" : "Add Contact"}</h2>
 
@@ -6090,7 +6090,7 @@ export default function PulseApp() {
             )}
             {sfShowAdd && sfUnlocked && (
               <div style={{position:"absolute",inset:0,zIndex:200,background:isDark?"rgba(0,0,0,0.7)":"rgba(0,0,0,0.4)",display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={()=>sfResetForm()}>
-                <div style={{background:isDark?"#13151A":"#fff",borderRadius:"24px 24px 0 0",padding:"20px 18px 36px",border:`1px solid ${T.border}`,maxHeight:"85%",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+                <div style={{background:isDark?"#13151A":"#fff",borderRadius:"24px 24px 0 0",padding:"20px 18px max(36px,calc(36px + env(safe-area-inset-bottom,0px)))",border:`1px solid ${T.border}`,maxHeight:"85%",overflowY:"auto",WebkitOverflowScrolling:"touch"}} onClick={e=>e.stopPropagation()}>
                   <div style={{width:36,height:4,background:isDark?"rgba(255,255,255,0.2)":"rgba(0,0,0,0.15)",borderRadius:2,margin:"0 auto 16px"}}/>
                   <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:14}}>🔒 {sfEditId?"Edit":"Add"} {sfTab==="bank"?"Bank Account":"Login Credential"}</div>
 
@@ -6485,7 +6485,7 @@ export default function PulseApp() {
             {/* Log Period Modal */}
             {pcShowLog && (
               <div style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>{setPcShowLog(false);setPcLogType("period");setPcTestResult("");setPcLmpDate("");}}>
-                <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:T.bg,borderRadius:"24px 24px 0 0",padding:"20px 20px 40px",maxHeight:"85vh",overflowY:"auto"}}>
+                <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:T.bg,borderRadius:"24px 24px 0 0",padding:"20px 20px max(40px,calc(40px + env(safe-area-inset-bottom,0px)))",maxHeight:"85vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
                   <div style={{width:40,height:4,borderRadius:2,background:T.border,margin:"0 auto 16px"}}/>
                   <h2 style={{fontSize:20,fontWeight:900,color:T.text,margin:"0 0 14px"}}>Log Entry</h2>
 
@@ -6904,7 +6904,7 @@ export default function PulseApp() {
             </div>
 
             {/* Bottom Nav */}
-            <div style={{position:"fixed",bottom:0,left:0,right:0,background:isDark?"rgba(8,10,14,0.95)":"rgba(255,255,255,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:`1px solid ${isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.08)"}`,display:"flex",alignItems:"center",justifyContent:"space-around",padding:"8px 0 env(safe-area-inset-bottom,8px)",zIndex:100}}>
+            <div style={{position:"fixed",bottom:0,left:0,right:0,background:isDark?"rgba(8,10,14,0.95)":"rgba(255,255,255,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:`1px solid ${isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.08)"}`,display:"flex",alignItems:"center",justifyContent:"space-around",padding:"8px 0 max(env(safe-area-inset-bottom,8px),8px)",zIndex:100}}>
               {[
                 {key:null,label:"Home",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},
                 {key:"movies",label:"Movies",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>},

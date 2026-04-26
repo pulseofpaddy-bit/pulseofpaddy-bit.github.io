@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <!-- viewport-fit=cover enables safe area insets on iPhone notch/Dynamic Island -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <title>Pulse App</title>
 
   <!-- Favicon -->
@@ -12,16 +13,83 @@
 
   <!-- PWA Support -->
   <link rel="manifest" href="/site.webmanifest" />
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <meta name="theme-color" content="#1a0533" />
-  <meta name="mobile-web-app-capable" content="yes" />
+
+  <!-- iOS PWA / Apple Touch Icons -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
+
+  <!-- iOS PWA Meta Tags -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Pulse" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <!-- Theme color for browser chrome -->
+  <meta name="theme-color" content="#1a0533" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+
+  <!-- Prevent phone number detection on iOS -->
+  <meta name="format-detection" content="telephone=no" />
 
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body, #root { width: 100%; min-height: 100vh; min-height: 100dvh; }
+    /* Reset */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* Full height including iOS safe areas */
+    html {
+      height: -webkit-fill-available;
+      height: 100%;
+    }
+
+    body {
+      width: 100%;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      min-height: 100dvh;
+      overscroll-behavior: none;
+      -webkit-overflow-scrolling: touch;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+
+    #root {
+      width: 100%;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Fix iOS input zoom — inputs must be at least 16px to prevent auto-zoom */
+    input, textarea, select {
+      font-size: 16px !important;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    /* Fix iOS date/time input appearance */
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"] {
+      -webkit-appearance: none;
+      appearance: none;
+      min-height: 44px;
+    }
+
+    /* Remove blue tap highlight on iOS */
+    * { -webkit-tap-highlight-color: transparent; }
+
+    /* Smooth momentum scrolling for iOS */
+    [style*="overflow"] { -webkit-overflow-scrolling: touch; }
+
+    /* Prevent callout on long press for images and links */
+    img, a { -webkit-touch-callout: none; }
+
+    /* Hide scrollbars visually but keep scroll functionality */
+    ::-webkit-scrollbar { display: none; }
+    * { scrollbar-width: none; ms-overflow-style: none; }
   </style>
 </head>
 <body>
@@ -30,31 +98,23 @@
   <!-- React 18 via CDN -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
   <!-- Babel standalone — transpiles JSX in the browser -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <!-- Load PulseApp.jsx as JSX -->
   <script type="text/babel" data-type="module">
     const { useState, useEffect, useRef } = React;
-
     try {
-    const response = await fetch('./PulseApp.jsx');
-    if (!response.ok) throw new Error('Could not load PulseApp.jsx — make sure you are running a local server');
-    let source = await response.text();
-
-    source = source.replace(/^import\s+\{[^}]+\}\s+from\s+['"]react['"];?\s*/m, '');
-    source = source.replace(/^export\s+default\s+/m, 'const __PulseApp__ = ');
-
-    const transpiled = Babel.transform(source, {
-      presets: ['react'],
-    }).code;
-
-    const fn = new Function('React', 'useState', 'useEffect', 'useRef', transpiled + '\nreturn __PulseApp__;');
-    const PulseApp = fn(React, useState, useEffect, useRef);
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(React.createElement(PulseApp));
+      const response = await fetch('./PulseApp.jsx');
+      if (!response.ok) throw new Error('Could not load PulseApp.jsx — make sure you are running a local server');
+      let source = await response.text();
+      source = source.replace(/^import\s+\{[^}]+\}\s+from\s+['"]react['"];?\s*/m, '');
+      source = source.replace(/^export\s+default\s+/m, 'const __PulseApp__ = ');
+      const transpiled = Babel.transform(source, { presets: ['react'] }).code;
+      const fn = new Function('React', 'useState', 'useEffect', 'useRef', transpiled + '\nreturn __PulseApp__;');
+      const PulseApp = fn(React, useState, useEffect, useRef);
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(React.createElement(PulseApp));
     } catch(e) {
       document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">ERROR: ' + e.message + '\n\n' + (e.stack||'') + '</pre>';
       console.error(e);
