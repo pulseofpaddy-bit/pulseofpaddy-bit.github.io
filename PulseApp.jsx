@@ -2970,35 +2970,72 @@ export default function PulseApp() {
   // Send invite email via Gmail API
   async function fwSendInviteEmail(toEmail, toName, token) {
     const fromName = fwUser?.name || "PulseApp";
-    const appUrl = window.location.href.split("#")[0].split("?")[0];
-    const subject = `${fromName} invited you to PulseApp Family`;
-    const body = [
+    const appUrl = "https://pulseofpaddy-bit.github.io";
+    const subject = `${fromName} invited you to join PulseApp Family`;
+    const htmlBody = [
+      `<!DOCTYPE html><html><head><meta charset="UTF-8"></head>`,
+      `<body style="margin:0;padding:0;background:#f3f0ff;font-family:Arial,sans-serif;">`,
+      `<div style="max-width:480px;margin:32px auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(168,85,247,0.12);">`,
+      `  <div style="background:linear-gradient(135deg,#1a0533,#3b0764);padding:32px 28px 24px;text-align:center;">`,
+      `    <div style="font-size:48px;margin-bottom:8px;">&#128156;</div>`,
+      `    <h1 style="color:#fff;font-size:24px;font-weight:900;margin:0 0 6px;">You're invited to PulseApp!</h1>`,
+      `    <p style="color:rgba(255,255,255,0.65);font-size:14px;margin:0;">${fromName} added you to their family workspace</p>`,
+      `  </div>`,
+      `  <div style="padding:28px 28px 8px;">`,
+      `    <p style="color:#1f2937;font-size:15px;margin:0 0 16px;">Hi <strong>${toName}</strong>,</p>`,
+      `    <p style="color:#4b5563;font-size:14px;line-height:1.6;margin:0 0 20px;"><strong>${fromName}</strong> has added you to their <strong>PulseApp family workspace</strong>. PulseApp is your family hub for shared groceries, to-dos, appointments, contacts, movies, and more.</p>`,
+      `    <div style="background:#f9f5ff;border:1px solid rgba(168,85,247,0.2);border-radius:14px;padding:18px 20px;margin-bottom:20px;">`,
+      `      <p style="color:#6b21a8;font-size:13px;font-weight:700;margin:0 0 12px;">&#128241; How to install on your phone</p>`,
+      `      <ol style="color:#374151;font-size:13px;line-height:1.8;margin:0;padding-left:18px;">`,
+      `        <li>Open the link below in your phone browser</li>`,
+      `        <li><strong>iPhone:</strong> Tap Share &#8594; "Add to Home Screen"</li>`,
+      `        <li><strong>Android:</strong> Tap menu &#8594; "Add to Home screen"</li>`,
+      `        <li>Log in with your Google account (${toEmail})</li>`,
+      `        <li>You'll automatically join the family workspace!</li>`,
+      `      </ol>`,
+      `    </div>`,
+      `    <div style="text-align:center;margin-bottom:24px;">`,
+      `      <a href="${appUrl}" style="display:inline-block;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;text-decoration:none;font-size:16px;font-weight:800;padding:16px 40px;border-radius:14px;">&#128242; Open PulseApp</a>`,
+      `      <p style="color:#9ca3af;font-size:12px;margin:10px 0 0;">${appUrl}</p>`,
+      `    </div>`,
+      `  </div>`,
+      `  <div style="background:#f9f5ff;padding:16px 28px;text-align:center;border-top:1px solid rgba(168,85,247,0.1);">`,
+      `    <p style="color:#9ca3af;font-size:11px;margin:0;">Sent via PulseApp &middot; Family Workspace Invitation</p>`,
+      `  </div>`,
+      `</div></body></html>`
+    ].join("\n");
+    const plainBody = [
       `Hi ${toName},`,
       ``,
       `${fromName} has added you to their PulseApp family workspace!`,
       ``,
-      `PulseApp is a family hub for managing appointments, groceries, to-dos, contacts, and more — all shared in real-time.`,
+      `Install PulseApp on your phone: ${appUrl}`,
       ``,
-      `Open PulseApp on your phone:`,
-      `${appUrl}`,
+      `iPhone: Open link in Safari -> Share -> "Add to Home Screen"`,
+      `Android: Open link in Chrome -> Menu -> "Add to Home screen"`,
       ``,
-      `To get started:`,
-      `1. Open the link above in your phone browser`,
-      `2. Tap "Add to Home Screen" to install it as an app`,
-      `3. Log in with your Google account (${toEmail})`,
-      `4. You will automatically join the family workspace`,
+      `Log in with your Google account (${toEmail}) and you will automatically join the family workspace.`,
       ``,
-      `- Sent from PulseApp`
+      `- PulseApp`
     ].join("\n");
-
     const rawEmail = [
       `To: ${toEmail}`,
       `Subject: ${subject}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: multipart/alternative; boundary="PulseAppBoundary"`,
+      ``,
+      `--PulseAppBoundary`,
       `Content-Type: text/plain; charset=UTF-8`,
       ``,
-      body
+      plainBody,
+      ``,
+      `--PulseAppBoundary`,
+      `Content-Type: text/html; charset=UTF-8`,
+      ``,
+      htmlBody,
+      ``,
+      `--PulseAppBoundary--`
     ].join("\r\n");
-
     const encoded = btoa(unescape(encodeURIComponent(rawEmail))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
     try {
       const res = await fetch("https://www.googleapis.com/gmail/v1/users/me/messages/send", {
@@ -3008,9 +3045,8 @@ export default function PulseApp() {
       });
       if (res.ok) return true;
     } catch(e) {}
-    // Fallback: open mailto link
     const mailtoSubject = encodeURIComponent(subject);
-    const mailtoBody = encodeURIComponent(body);
+    const mailtoBody = encodeURIComponent(plainBody);
     window.open(`mailto:${toEmail}?subject=${mailtoSubject}&body=${mailtoBody}`, "_blank");
     return true;
   }
@@ -3117,15 +3153,15 @@ export default function PulseApp() {
       const email = validEmails[i].trim().toLowerCase();
       const name = (onboardingAddNames[origIdx] || "").trim() || email.split("@")[0];
       const gender = (onboardingAddGenders[origIdx] || "").trim();
-      // Share workspace
       await fwShareWorkspace(email, fwToken).catch(() => {});
-      // Add to members
       const current = await fwReadFile(fwWorkspace.fileIds.members, fwToken);
       if (!current.some(m => m.email === email)) {
         const updated = [...current, { name, email, gender, role: "member", joinedAt: Date.now() }];
         await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken);
         setFwMembers(updated);
       }
+      // Send invite email with app install link
+      await fwSendInviteEmail(email, name, fwToken).catch(() => {});
     }
     setOnboardingInviting(false);
     setOnboardingStep(null);
