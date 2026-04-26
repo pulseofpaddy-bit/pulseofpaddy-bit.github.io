@@ -567,7 +567,7 @@ export default function PulseApp() {
   const [fwToken, setFwToken]             = useState(() => localStorage.getItem("pulse_fw_token")||null);
   const [fwRole, setFwRole]               = useState(() => localStorage.getItem("pulse_fw_role")||null); // "head" | "member"
   const [fwWorkspace, setFwWorkspace]     = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_fw_workspace")||"null"); } catch { return null; } }); // { folderId, fileIds:{grocery,todos,appointments,members} }
-  const [fwMembers, setFwMembers]         = useState([]);  // [{ name, email, role, joinedAt }]
+  const [fwMembers, setFwMembers]         = useState(() => { try { const c = localStorage.getItem('pulse_fw_members_cache'); return c ? JSON.parse(c) : []; } catch { return []; } });  // [{ name, email, role, joinedAt }]
   const [fwScreen, setFwScreen]           = useState("home"); // "home" | "setup" | "invite"
   const [fwLoading, setFwLoading]         = useState(false);
   const [fwError, setFwError]             = useState("");
@@ -2736,17 +2736,21 @@ export default function PulseApp() {
 
   // Find or create the PulseApp_Workspace folder and all JSON files
   async function fwInitWorkspace(token) {
-    // Search for existing folder (owned or shared)
+    // Search for workspace folder — owned OR shared with me (for family members)
     const q = encodeURIComponent(`name='${WORKSPACE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,ownedByMe)`, {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,ownedByMe)&includeItemsFromAllDrives=true&supportsAllDrives=true`, {
       headers:{ Authorization:`Bearer ${token}` }
     });
     const d = await res.json();
-    let folderId = d.files?.[0]?.id || null;
-    const isOwner = d.files?.[0]?.ownedByMe ?? false;
+    // Prefer owned folder (head), then shared folder (member invited by head)
+    const ownedFolder = d.files?.find(f => f.ownedByMe);
+    const sharedFolder = d.files?.find(f => !f.ownedByMe);
+    const chosenFolder = ownedFolder || sharedFolder || null;
+    let folderId = chosenFolder?.id || null;
+    const isOwner = chosenFolder?.ownedByMe ?? false;
 
     if (!folderId) {
-      // Create new workspace folder
+      // No workspace found — create new one (this user becomes head)
       const cr = await fetch("https://www.googleapis.com/drive/v3/files", {
         method:"POST",
         headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" },
@@ -2755,6 +2759,7 @@ export default function PulseApp() {
       const cd = await cr.json();
       folderId = cd.id;
     }
+
 
     // Find or create each JSON file
     const fileIds = {};
@@ -2910,7 +2915,12 @@ export default function PulseApp() {
   // Load members when workspace is available
   useEffect(() => {
     if (fwWorkspace?.fileIds?.members && fwToken) {
-      fwReadFile(fwWorkspace.fileIds.members, fwToken).then(m => setFwMembers(Array.isArray(m) ? m : []));
+      fwReadFile(fwWorkspace.fileIds.members, fwToken).then(m => {
+        if (m === null) return; // expired token — keep existing state/cache
+        const list = Array.isArray(m) ? m : [];
+        setFwMembers(list);
+        if (list.length > 0) localStorage.setItem("pulse_fw_members_cache", JSON.stringify(list));
+      });
     }
   }, [fwWorkspace, fwToken]);
 
@@ -3077,6 +3087,13 @@ export default function PulseApp() {
         localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
       }
       // Send invite email — completely independent, never blocks member add
+        // Reload from Drive to confirm write succeeded and refresh member list
+        fwReadFile(fwWorkspace.fileIds.members, fwToken).then(m => {
+          if (Array.isArray(m) && m.length > 0) {
+            setFwMembers(m);
+            localStorage.setItem("pulse_fw_members_cache", JSON.stringify(m));
+          }
+        }).catch(() => {});
       fwSendInviteEmail(email, name, fwToken).catch(() => {});
       setFwInviteEmail("");
       setFwInviteName("");
@@ -3120,30 +3137,40 @@ export default function PulseApp() {
       setFwRole(role);
       localStorage.setItem("pulse_fw_role", role);
       // Add self to members
-      const members = await fwReadFile(ws.fileIds.members, fwToken);
+      const rawMembers = await fwReadFile(ws.fileIds.members, fwToken);
+      const members = Array.isArray(rawMembers) ? rawMembers : [];
       const alreadyIn = members.some(m => m.email === fwUser.email);
       if (!alreadyIn) {
         const updated = [...members, { name: fwUser.name, email: fwUser.email, gender: onboardingGender, role, joinedAt: Date.now(), photo: fwUser.photo }];
         await fwWriteFile(ws.fileIds.members, updated, fwToken);
         setFwMembers(updated);
+        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
       } else {
         // Update role and gender
         const updated = members.map(m => m.email === fwUser.email ? { ...m, role, gender: onboardingGender || m.gender, name: fwUser.name, photo: fwUser.photo } : m);
         await fwWriteFile(ws.fileIds.members, updated, fwToken);
         setFwMembers(updated);
+        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
       }
       if (role === "head") {
         setOnboardingStep("add_members");
       } else {
-        // Member — check if their email was pre-added by a head
-        const memberEntry = members.find(m => m.email === fwUser.email);
-        if (memberEntry) {
-          // Already pre-registered, auto-join
+        // Member — if they found a shared workspace (not owned by them), they joined successfully
+        if (!isOwner) {
+          // They joined the head's shared workspace — auto-proceed
+          setFwRole("member");
+          localStorage.setItem("pulse_fw_role", "member");
           setOnboardingStep(null);
         } else {
-          // Not pre-registered — they need to be invited by a head first
-          setOnboardingMemberError("Your email has not been added by a Family Head yet. Ask your family head to add your email in Settings.");
-          setOnboardingStep("member_wait");
+          // They own this workspace — check if pre-registered as member by a head
+          const memberEntry = members.find(m => m.email === fwUser.email);
+          if (memberEntry && memberEntry.role === "member") {
+            setOnboardingStep(null);
+          } else {
+            // Not pre-registered — show waiting message
+            setOnboardingMemberError("Your email has not been added by a Family Head yet. Ask your family head to add your email in Settings → Family Workspace → + Invite.");
+            setOnboardingStep("member_wait");
+          }
         }
       }
     } catch(e) {
