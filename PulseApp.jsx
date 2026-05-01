@@ -584,7 +584,19 @@ export default function PulseApp() {
     // If already signed in with a role, skip onboarding
     const user = localStorage.getItem("pulse_fw_user");
     const role = localStorage.getItem("pulse_fw_role");
-    if (user && user !== "null" && role) return null;
+    if (user && user !== "null" && role) {
+      // Also check if gender is set in the members cache
+      try {
+        const userObj = JSON.parse(user);
+        const membersCache = localStorage.getItem("pulse_fw_members_cache");
+        if (membersCache) {
+          const members = JSON.parse(membersCache);
+          const me = members.find(m => m.email === userObj.email);
+          if (me && !me.gender) return "gender";
+        }
+      } catch {}
+      return null;
+    }
     if (user && user !== "null" && !role) return "role";
     return "splash";
   });
@@ -593,7 +605,22 @@ export default function PulseApp() {
   const [onboardingAddGenders, setOnboardingAddGenders] = useState([""]);
   const [onboardingInviting, setOnboardingInviting] = useState(false);
   const [onboardingMemberError, setOnboardingMemberError] = useState("");
-  const [onboardingGender, setOnboardingGender] = useState("");
+  const [onboardingGender, setOnboardingGender] = useState(() => {
+    // Pre-load saved gender from members cache so the gender step shows the correct selection
+    try {
+      const user = localStorage.getItem("pulse_fw_user");
+      if (user && user !== "null") {
+        const userObj = JSON.parse(user);
+        const membersCache = localStorage.getItem("pulse_fw_members_cache");
+        if (membersCache) {
+          const members = JSON.parse(membersCache);
+          const me = members.find(m => m.email === userObj.email);
+          if (me?.gender) return me.gender;
+        }
+      }
+    } catch {}
+    return "";
+  });
   const [editingProfile, setEditingProfile] = useState(false);
   const [editName, setEditName] = useState("");
   const [reminderWindow, setReminderWindow] = useState(() => localStorage.getItem("pulse_reminder_window") || "1 Day");
@@ -3887,6 +3914,8 @@ export default function PulseApp() {
                   if (!onboardingGender) return;
                   const updated = (fwMembers||[]).map(m => m.email === fwUser.email ? {...m, gender: onboardingGender} : m);
                   setFwMembers(updated);
+                  // Persist to localStorage cache immediately so gender survives app restart
+                  localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
                   if (fwWorkspace?.fileIds?.members && fwToken) {
                     fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken).catch(()=>{});
                   }
@@ -6722,6 +6751,8 @@ export default function PulseApp() {
                     updated = [...members, { name: fwUser.name, email: fwUser.email, gender: "", role: fwRole || "head", joinedAt: Date.now(), photo: fwUser.photo, [field]: value }];
                   }
                   setFwMembers(updated);
+                  // Always persist to localStorage cache so data survives app restart
+                  localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
                   if (fwWorkspace?.fileIds?.members && fwToken) {
                     fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken).catch(()=>{});
                   }
