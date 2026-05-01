@@ -100,7 +100,7 @@ const OTT_CATEGORIES = [
 const FAMILY_CLIENT_ID   = "360320151404-1miklman0sr6gends9nuuuggecauneea.apps.googleusercontent.com";
 const FAMILY_SCOPES      = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send";
 const WORKSPACE_FOLDER   = "PulseApp_Workspace";
-const WORKSPACE_FILES    = { grocery:"Grocery.json", todos:"Todo.json", appointments:"Appointments.json", members:"Members.json", periods:"Periods.json", pregnancy:"Pregnancy.json", contacts:"Contacts.json" };
+const WORKSPACE_FILES    = { grocery:"Grocery.json", todos:"Todo.json", appointments:"Appointments.json", members:"Members.json", periods:"Periods.json", pregnancy:"Pregnancy.json", contacts:"Contacts.json", payReminders:"PayReminders.json", moneyLent:"MoneyLent.json" };
 
 // ─── PINGME CONFIG ────────────────────────────────────────
 const PING_BASE     = "https://pulse-family-default-rtdb.firebaseio.com/pingme";
@@ -2003,6 +2003,55 @@ export default function PulseApp() {
     setCtEditId(c.id); setCtName(c.name); setCtPhone(c.phone); setCtAddress(c.address || ""); setCtMember(c.member || "me"); setCtShowAdd(true);
   }
 
+  // ─── FINANCE STATE ────────────────────────────────────────
+  const [finTab, setFinTab] = useState("reminders"); // "reminders" | "lent"
+  // Payment Reminders
+  const [payReminders, setPayReminders] = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_pay_reminders")||"[]"); } catch { return []; } });
+  const [prShowAdd, setPrShowAdd] = useState(false);
+  const [prEditId, setPrEditId] = useState(null);
+  const [prName, setPrName] = useState("");
+  const [prAmount, setPrAmount] = useState("");
+  const [prCurrency, setPrCurrency] = useState("USD");
+  const [prDueDate, setPrDueDate] = useState("");
+  const [prRecurrence, setPrRecurrence] = useState("Monthly");
+  const [prCategory, setPrCategory] = useState("Bill");
+  const [prNotes, setPrNotes] = useState("");
+  // Money Lent
+  const [moneyLent, setMoneyLent] = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_money_lent")||"[]"); } catch { return []; } });
+  const [mlShowAdd, setMlShowAdd] = useState(false);
+  const [mlEditId, setMlEditId] = useState(null);
+  const [mlFriend, setMlFriend] = useState("");
+  const [mlAmount, setMlAmount] = useState("");
+  const [mlCurrency, setMlCurrency] = useState("USD");
+  const [mlDate, setMlDate] = useState("");
+  const [mlNote, setMlNote] = useState("");
+  const [mlStatus, setMlStatus] = useState("pending"); // "pending" | "returned"
+
+  function prSave(items) { setPayReminders(items); localStorage.setItem("pulse_pay_reminders", JSON.stringify(items)); if (fwWorkspace?.fileIds?.payReminders && fwToken) fwWriteFile(fwWorkspace.fileIds.payReminders, items, fwToken); }
+  function mlSave(items) { setMoneyLent(items); localStorage.setItem("pulse_money_lent", JSON.stringify(items)); if (fwWorkspace?.fileIds?.moneyLent && fwToken) fwWriteFile(fwWorkspace.fileIds.moneyLent, items, fwToken); }
+
+  function prSubmit() {
+    if (!prName.trim() || !prAmount || !prDueDate) return;
+    const entry = { id: prEditId || Date.now().toString(), name: prName.trim(), amount: parseFloat(prAmount), currency: prCurrency, dueDate: prDueDate, recurrence: prRecurrence, category: prCategory, notes: prNotes.trim(), paid: false };
+    const updated = prEditId ? payReminders.map(r => r.id === prEditId ? entry : r) : [entry, ...payReminders];
+    prSave(updated);
+    setPrShowAdd(false); setPrEditId(null); setPrName(""); setPrAmount(""); setPrCurrency("USD"); setPrDueDate(""); setPrRecurrence("Monthly"); setPrCategory("Bill"); setPrNotes("");
+  }
+  function prEdit(r) { setPrEditId(r.id); setPrName(r.name); setPrAmount(String(r.amount)); setPrCurrency(r.currency||"USD"); setPrDueDate(r.dueDate); setPrRecurrence(r.recurrence||"Monthly"); setPrCategory(r.category||"Bill"); setPrNotes(r.notes||""); setPrShowAdd(true); }
+  function prDelete(id) { prSave(payReminders.filter(r => r.id !== id)); }
+  function prTogglePaid(id) { prSave(payReminders.map(r => r.id === id ? { ...r, paid: !r.paid } : r)); }
+
+  function mlSubmit() {
+    if (!mlFriend.trim() || !mlAmount || !mlDate) return;
+    const entry = { id: mlEditId || Date.now().toString(), friend: mlFriend.trim(), amount: parseFloat(mlAmount), currency: mlCurrency, date: mlDate, note: mlNote.trim(), status: mlStatus };
+    const updated = mlEditId ? moneyLent.map(r => r.id === mlEditId ? entry : r) : [entry, ...moneyLent];
+    mlSave(updated);
+    setMlShowAdd(false); setMlEditId(null); setMlFriend(""); setMlAmount(""); setMlCurrency("USD"); setMlDate(""); setMlNote(""); setMlStatus("pending");
+  }
+  function mlEdit(r) { setMlEditId(r.id); setMlFriend(r.friend); setMlAmount(String(r.amount)); setMlCurrency(r.currency||"USD"); setMlDate(r.date); setMlNote(r.note||""); setMlStatus(r.status||"pending"); setMlShowAdd(true); }
+  function mlDelete(id) { mlSave(moneyLent.filter(r => r.id !== id)); }
+  function mlToggleStatus(id) { mlSave(moneyLent.map(r => r.id === id ? { ...r, status: r.status === "returned" ? "pending" : "returned" } : r)); }
+
   // ─── SECURE FOLDER STATE ────────────────────────────────────────
   const [sfItems, setSfItems] = useState([]);
   const [sfUnlocked, setSfUnlocked] = useState(false);
@@ -3104,6 +3153,23 @@ export default function PulseApp() {
           const sorted = data.sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time));
           setApptItems(sorted);
           localStorage.setItem("pulse_appointments", JSON.stringify(sorted));
+        }
+      });
+    }
+    // Load Finance data from Drive
+    if (fwWorkspace?.fileIds?.payReminders && fwToken) {
+      fwReadFile(fwWorkspace.fileIds.payReminders, fwToken).then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setPayReminders(data);
+          localStorage.setItem("pulse_pay_reminders", JSON.stringify(data));
+        }
+      });
+    }
+    if (fwWorkspace?.fileIds?.moneyLent && fwToken) {
+      fwReadFile(fwWorkspace.fileIds.moneyLent, fwToken).then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setMoneyLent(data);
+          localStorage.setItem("pulse_money_lent", JSON.stringify(data));
         }
       });
     }
@@ -4342,6 +4408,15 @@ export default function PulseApp() {
                       </div>
                       <div style={titleStyle}>Secure</div>
                       <div style={subStyle}>VAULT</div>
+                    </div>
+
+                    {/* Finance */}
+                    <div onClick={()=>setMainTab("finance")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.75s both"}}>
+                      <div style={iconWrap("rgba(34,197,94,0.10)","rgba(34,197,94,0.15)")}>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#86EFAC":"#16A34A"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                      </div>
+                      <div style={titleStyle}>Finance</div>
+                      <div style={subStyle}>TRACKER</div>
                     </div>
 
                   </div>
@@ -6930,6 +7005,231 @@ export default function PulseApp() {
             )}
           </div>
         )}
+
+        {/* ─── FINANCE SCREEN ────────────────────────────────────────*/}
+        {mainTab === "finance" && (() => {
+          const fmt = (amt, cur) => (cur === "INR" ? "\u20B9" : "$") + Number(amt).toLocaleString("en-US", {minimumFractionDigits:2,maximumFractionDigits:2});
+          const today = new Date().toISOString().split("T")[0];
+          const inputStyle = {width:"100%",padding:"12px 14px",borderRadius:12,border:`1.5px solid ${T.border}`,background:T.bgCard,color:T.text,fontSize:14,outline:"none",boxSizing:"border-box"};
+          const labelStyle = {fontSize:11,fontWeight:700,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6,display:"block"};
+          const btnPrimary = {padding:"14px",borderRadius:14,background:"linear-gradient(135deg,#16A34A,#15803D)",color:"#fff",fontWeight:800,fontSize:15,border:"none",cursor:"pointer",width:"100%"};
+          const pendingLent = moneyLent.filter(r=>r.status==="pending");
+          const returnedLent = moneyLent.filter(r=>r.status==="returned");
+          const totalPendingINR = pendingLent.filter(r=>r.currency==="INR").reduce((s,r)=>s+r.amount,0);
+          const totalPendingUSD = pendingLent.filter(r=>r.currency==="USD").reduce((s,r)=>s+r.amount,0);
+          const overdueReminders = payReminders.filter(r=>!r.paid && r.dueDate < today);
+          return (
+          <div style={{flex:1,display:"flex",flexDirection:"column",padding:"0 0 100px",animation:"fadeIn 0.3s ease"}}>
+            {/* Header */}
+            <div style={{padding:"20px 20px 14px",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <h1 style={{fontSize:28,fontWeight:900,color:T.text,fontFamily:"Georgia,serif",letterSpacing:"-0.03em",margin:0}}>Finance</h1>
+                <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginTop:4}}>Reminders & Lending</div>
+              </div>
+              <div onClick={()=>setMainTab(null)} style={{width:36,height:36,borderRadius:12,background:T.bgCard,border:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </div>
+            </div>
+
+            {/* Summary Cards */}
+            <div style={{padding:"0 16px 16px",display:"flex",gap:10}}>
+              <div style={{flex:1,background:overdueReminders.length>0?"linear-gradient(135deg,#EF4444,#DC2626)":"linear-gradient(135deg,#16A34A,#15803D)",borderRadius:16,padding:"14px",color:"#fff"}}>
+                <div style={{fontSize:10,fontWeight:700,opacity:0.85,textTransform:"uppercase",letterSpacing:"0.06em"}}>Due Reminders</div>
+                <div style={{fontSize:26,fontWeight:900,marginTop:4}}>{payReminders.filter(r=>!r.paid).length}</div>
+                {overdueReminders.length>0 && <div style={{fontSize:10,opacity:0.9,marginTop:2}}>{overdueReminders.length} overdue</div>}
+              </div>
+              <div style={{flex:1,background:"linear-gradient(135deg,#F59E0B,#D97706)",borderRadius:16,padding:"14px",color:"#fff"}}>
+                <div style={{fontSize:10,fontWeight:700,opacity:0.85,textTransform:"uppercase",letterSpacing:"0.06em"}}>Pending Lent</div>
+                {totalPendingINR>0 && <div style={{fontSize:18,fontWeight:900,marginTop:4}}>{fmt(totalPendingINR,"INR")}</div>}
+                {totalPendingUSD>0 && <div style={{fontSize:18,fontWeight:900,marginTop:totalPendingINR>0?2:4}}>{fmt(totalPendingUSD,"USD")}</div>}
+                {totalPendingINR===0 && totalPendingUSD===0 && <div style={{fontSize:18,fontWeight:900,marginTop:4}}>$0.00</div>}
+              </div>
+            </div>
+
+            {/* Sub-tabs */}
+            <div style={{padding:"0 16px 14px",display:"flex",gap:8}}>
+              {[{k:"reminders",label:"💳 Payment Reminders"},{k:"lent",label:"🤝 Money Lent"}].map(t=>(
+                <div key={t.k} onClick={()=>setFinTab(t.k)} style={{flex:1,padding:"10px 0",borderRadius:12,textAlign:"center",fontWeight:700,fontSize:13,cursor:"pointer",background:finTab===t.k?"linear-gradient(135deg,#16A34A,#15803D)":(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:finTab===t.k?"#fff":T.text,border:finTab===t.k?"none":`1px solid ${T.border}`}}>{t.label}</div>
+              ))}
+            </div>
+
+            <div style={{flex:1,overflowY:"auto",padding:"0 16px"}}>
+
+            {/* ── PAYMENT REMINDERS TAB ── */}
+            {finTab === "reminders" && (
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.textFaint}}>{payReminders.length} reminder{payReminders.length!==1?"s":""}</div>
+                  <div onClick={()=>{setPrEditId(null);setPrName("");setPrAmount("");setPrCurrency("USD");setPrDueDate("");setPrRecurrence("Monthly");setPrCategory("Bill");setPrNotes("");setPrShowAdd(true);}} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:12,background:"linear-gradient(135deg,#16A34A,#15803D)",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add
+                  </div>
+                </div>
+
+                {/* Add/Edit Reminder Form */}
+                {prShowAdd && (
+                  <div style={{background:T.bgCard,borderRadius:18,border:`1.5px solid ${T.border}`,padding:"18px",marginBottom:16}}>
+                    <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:16}}>{prEditId?"Edit Reminder":"Add Reminder"}</div>
+                    <div style={{marginBottom:12}}><label style={labelStyle}>Bill / Subscription Name *</label><input value={prName} onChange={e=>setPrName(e.target.value)} placeholder="e.g. Netflix, Electricity, Rent" style={inputStyle}/></div>
+                    <div style={{display:"flex",gap:10,marginBottom:12}}>
+                      <div style={{flex:1}}><label style={labelStyle}>Amount *</label><input type="number" value={prAmount} onChange={e=>setPrAmount(e.target.value)} placeholder="0.00" style={inputStyle}/></div>
+                      <div style={{width:100}}><label style={labelStyle}>Currency</label>
+                        <div style={{display:"flex",gap:6}}>
+                          {["USD","INR"].map(c=>(<div key={c} onClick={()=>setPrCurrency(c)} style={{flex:1,padding:"12px 0",borderRadius:10,textAlign:"center",fontWeight:700,fontSize:13,cursor:"pointer",background:prCurrency===c?(c==="INR"?"#FF6B00":"#16A34A"):(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:prCurrency===c?"#fff":T.text,border:prCurrency===c?"none":`1px solid ${T.border}`}}>{c==="INR"?"₹ INR":"$ USD"}</div>))}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{marginBottom:12}}><label style={labelStyle}>Due Date *</label><input type="date" value={prDueDate} onChange={e=>setPrDueDate(e.target.value)} style={inputStyle}/></div>
+                    <div style={{marginBottom:12}}><label style={labelStyle}>Recurrence</label>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                        {["One-time","Weekly","Monthly","Quarterly","Yearly"].map(r=>(<div key={r} onClick={()=>setPrRecurrence(r)} style={{padding:"8px 12px",borderRadius:10,fontWeight:700,fontSize:12,cursor:"pointer",background:prRecurrence===r?"linear-gradient(135deg,#6366F1,#4F46E5)":(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:prRecurrence===r?"#fff":T.text,border:prRecurrence===r?"none":`1px solid ${T.border}`}}>{r}</div>))}
+                      </div>
+                    </div>
+                    <div style={{marginBottom:12}}><label style={labelStyle}>Category</label>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                        {["Bill","Subscription","Rent","Insurance","Loan","Other"].map(c=>(<div key={c} onClick={()=>setPrCategory(c)} style={{padding:"8px 12px",borderRadius:10,fontWeight:700,fontSize:12,cursor:"pointer",background:prCategory===c?"linear-gradient(135deg,#F59E0B,#D97706)":(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:prCategory===c?"#fff":T.text,border:prCategory===c?"none":`1px solid ${T.border}`}}>{c}</div>))}
+                      </div>
+                    </div>
+                    <div style={{marginBottom:16}}><label style={labelStyle}>Notes (optional)</label><input value={prNotes} onChange={e=>setPrNotes(e.target.value)} placeholder="Any extra details..." style={inputStyle}/></div>
+                    <div style={{display:"flex",gap:10}}>
+                      <div onClick={()=>setPrShowAdd(false)} style={{flex:1,padding:"13px",borderRadius:12,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",color:T.text,fontWeight:700,fontSize:14,textAlign:"center",cursor:"pointer",border:`1px solid ${T.border}`}}>Cancel</div>
+                      <div onClick={prSubmit} style={{flex:2,...btnPrimary,padding:"13px",borderRadius:12,textAlign:"center"}}>Save Reminder</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reminder List */}
+                {payReminders.length === 0 && !prShowAdd && (
+                  <div style={{textAlign:"center",padding:"40px 20px",color:T.textFaint}}>
+                    <div style={{fontSize:40,marginBottom:12}}>💳</div>
+                    <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:6}}>No reminders yet</div>
+                    <div style={{fontSize:13}}>Add bills, subscriptions, or rent reminders</div>
+                  </div>
+                )}
+                {payReminders.map(r => {
+                  const isOverdue = !r.paid && r.dueDate < today;
+                  const isDueToday = !r.paid && r.dueDate === today;
+                  const daysUntil = Math.ceil((new Date(r.dueDate+"T00:00:00") - new Date(today+"T00:00:00")) / 86400000);
+                  return (
+                  <div key={r.id} style={{background:T.bgCard,borderRadius:16,border:`1.5px solid ${isOverdue?"#EF4444":isDueToday?"#F59E0B":T.border}`,padding:"14px",marginBottom:10,opacity:r.paid?0.55:1}}>
+                    <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                      <div onClick={()=>prTogglePaid(r.id)} style={{width:24,height:24,borderRadius:8,border:`2px solid ${r.paid?"#16A34A":T.border}`,background:r.paid?"#16A34A":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,marginTop:2}}>
+                        {r.paid && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div style={{fontSize:15,fontWeight:800,color:r.paid?T.textFaint:T.text,textDecoration:r.paid?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</div>
+                          <div style={{fontSize:16,fontWeight:900,color:r.currency==="INR"?"#FF6B00":"#16A34A",flexShrink:0,marginLeft:8}}>{fmt(r.amount,r.currency)}</div>
+                        </div>
+                        <div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap",alignItems:"center"}}>
+                          <span style={{fontSize:11,padding:"3px 8px",borderRadius:8,background:isOverdue?"rgba(239,68,68,0.12)":isDueToday?"rgba(245,158,11,0.12)":"rgba(99,102,241,0.10)",color:isOverdue?"#EF4444":isDueToday?"#F59E0B":"#6366F1",fontWeight:700}}>{isOverdue?"Overdue":isDueToday?"Due Today":daysUntil>0?`Due in ${daysUntil}d`:"Paid"}</span>
+                          <span style={{fontSize:11,padding:"3px 8px",borderRadius:8,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",color:T.textFaint,fontWeight:600}}>{r.recurrence}</span>
+                          <span style={{fontSize:11,padding:"3px 8px",borderRadius:8,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",color:T.textFaint,fontWeight:600}}>{r.category}</span>
+                        </div>
+                        <div style={{fontSize:11,color:T.textFaint,marginTop:4}}>Due: {new Date(r.dueDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+                        {r.notes && <div style={{fontSize:11,color:T.textFaint,marginTop:2,fontStyle:"italic"}}>{r.notes}</div>}
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                        <div onClick={()=>prEdit(r)} style={{width:30,height:30,borderRadius:8,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></div>
+                        <div onClick={()=>prDelete(r.id)} style={{width:30,height:30,borderRadius:8,background:"rgba(239,68,68,0.10)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></div>
+                      </div>
+                    </div>
+                  </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── MONEY LENT TAB ── */}
+            {finTab === "lent" && (
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.textFaint}}>{moneyLent.length} record{moneyLent.length!==1?"s":""}</div>
+                  <div onClick={()=>{setMlEditId(null);setMlFriend("");setMlAmount("");setMlCurrency("USD");setMlDate(today);setMlNote("");setMlStatus("pending");setMlShowAdd(true);}} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:12,background:"linear-gradient(135deg,#F59E0B,#D97706)",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add
+                  </div>
+                </div>
+
+                {/* Add/Edit Lent Form */}
+                {mlShowAdd && (
+                  <div style={{background:T.bgCard,borderRadius:18,border:`1.5px solid ${T.border}`,padding:"18px",marginBottom:16}}>
+                    <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:16}}>{mlEditId?"Edit Record":"Record Money Lent"}</div>
+                    <div style={{marginBottom:12}}><label style={labelStyle}>Friend / Person Name *</label><input value={mlFriend} onChange={e=>setMlFriend(e.target.value)} placeholder="e.g. Ravi, Priya" style={inputStyle}/></div>
+                    <div style={{display:"flex",gap:10,marginBottom:12}}>
+                      <div style={{flex:1}}><label style={labelStyle}>Amount *</label><input type="number" value={mlAmount} onChange={e=>setMlAmount(e.target.value)} placeholder="0.00" style={inputStyle}/></div>
+                      <div style={{width:100}}><label style={labelStyle}>Currency</label>
+                        <div style={{display:"flex",gap:6}}>
+                          {["USD","INR"].map(c=>(<div key={c} onClick={()=>setMlCurrency(c)} style={{flex:1,padding:"12px 0",borderRadius:10,textAlign:"center",fontWeight:700,fontSize:13,cursor:"pointer",background:mlCurrency===c?(c==="INR"?"#FF6B00":"#16A34A"):(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:mlCurrency===c?"#fff":T.text,border:mlCurrency===c?"none":`1px solid ${T.border}`}}>{c==="INR"?"₹ INR":"$ USD"}</div>))}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{marginBottom:12}}><label style={labelStyle}>Date Lent *</label><input type="date" value={mlDate} onChange={e=>setMlDate(e.target.value)} style={inputStyle}/></div>
+                    <div style={{marginBottom:12}}><label style={labelStyle}>Status</label>
+                      <div style={{display:"flex",gap:8}}>
+                        {[{v:"pending",l:"⏳ Pending"},{v:"returned",l:"✅ Returned"}].map(s=>(<div key={s.v} onClick={()=>setMlStatus(s.v)} style={{flex:1,padding:"10px 0",borderRadius:10,textAlign:"center",fontWeight:700,fontSize:13,cursor:"pointer",background:mlStatus===s.v?(s.v==="returned"?"#16A34A":"#F59E0B"):(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:mlStatus===s.v?"#fff":T.text,border:mlStatus===s.v?"none":`1px solid ${T.border}`}}>{s.l}</div>))}
+                      </div>
+                    </div>
+                    <div style={{marginBottom:16}}><label style={labelStyle}>Note (optional)</label><input value={mlNote} onChange={e=>setMlNote(e.target.value)} placeholder="What was it for?" style={inputStyle}/></div>
+                    <div style={{display:"flex",gap:10}}>
+                      <div onClick={()=>setMlShowAdd(false)} style={{flex:1,padding:"13px",borderRadius:12,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",color:T.text,fontWeight:700,fontSize:14,textAlign:"center",cursor:"pointer",border:`1px solid ${T.border}`}}>Cancel</div>
+                      <div onClick={mlSubmit} style={{flex:2,padding:"13px",borderRadius:12,background:"linear-gradient(135deg,#F59E0B,#D97706)",color:"#fff",fontWeight:800,fontSize:14,textAlign:"center",cursor:"pointer"}}>Save Record</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Lent List */}
+                {moneyLent.length === 0 && !mlShowAdd && (
+                  <div style={{textAlign:"center",padding:"40px 20px",color:T.textFaint}}>
+                    <div style={{fontSize:40,marginBottom:12}}>🤝</div>
+                    <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:6}}>No records yet</div>
+                    <div style={{fontSize:13}}>Track money you've lent to friends</div>
+                  </div>
+                )}
+                {pendingLent.length > 0 && <div style={{fontSize:11,fontWeight:700,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>⏳ Pending ({pendingLent.length})</div>}
+                {pendingLent.map(r => (
+                  <div key={r.id} style={{background:T.bgCard,borderRadius:16,border:`1.5px solid ${T.border}`,padding:"14px",marginBottom:10}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:40,height:40,borderRadius:12,background:"rgba(245,158,11,0.12)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>🤝</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div style={{fontSize:15,fontWeight:800,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.friend}</div>
+                          <div style={{fontSize:17,fontWeight:900,color:r.currency==="INR"?"#FF6B00":"#16A34A",flexShrink:0,marginLeft:8}}>{fmt(r.amount,r.currency)}</div>
+                        </div>
+                        <div style={{fontSize:11,color:T.textFaint,marginTop:3}}>{new Date(r.date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}{r.note && " · "+r.note}</div>
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                        <div onClick={()=>mlToggleStatus(r.id)} title="Mark returned" style={{width:30,height:30,borderRadius:8,background:"rgba(34,197,94,0.12)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+                        <div onClick={()=>mlEdit(r)} style={{width:30,height:30,borderRadius:8,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></div>
+                        <div onClick={()=>mlDelete(r.id)} style={{width:30,height:30,borderRadius:8,background:"rgba(239,68,68,0.10)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {returnedLent.length > 0 && <div style={{fontSize:11,fontWeight:700,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8,marginTop:16}}>✅ Returned ({returnedLent.length})</div>}
+                {returnedLent.map(r => (
+                  <div key={r.id} style={{background:T.bgCard,borderRadius:16,border:`1.5px solid ${T.border}`,padding:"14px",marginBottom:10,opacity:0.6}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:40,height:40,borderRadius:12,background:"rgba(34,197,94,0.12)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>✅</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div style={{fontSize:15,fontWeight:800,color:T.text,textDecoration:"line-through",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.friend}</div>
+                          <div style={{fontSize:17,fontWeight:900,color:T.textFaint,flexShrink:0,marginLeft:8}}>{fmt(r.amount,r.currency)}</div>
+                        </div>
+                        <div style={{fontSize:11,color:T.textFaint,marginTop:3}}>{new Date(r.date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}{r.note && " · "+r.note}</div>
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                        <div onClick={()=>mlToggleStatus(r.id)} title="Mark pending" style={{width:30,height:30,borderRadius:8,background:"rgba(245,158,11,0.12)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg></div>
+                        <div onClick={()=>mlDelete(r.id)} style={{width:30,height:30,borderRadius:8,background:"rgba(239,68,68,0.10)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            </div>
+          </div>
+          );
+        })()}
 
         {/* ─── SETTINGS SCREEN ────────────────────────────────────────*/}
         {mainTab === "settings" && (
