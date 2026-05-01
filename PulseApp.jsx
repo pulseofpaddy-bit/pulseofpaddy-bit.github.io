@@ -1870,7 +1870,8 @@ export default function PulseApp() {
   const [showResvForm, setShowResvForm] = useState(false);
   const [resvForm, setResvForm]         = useState({ type:"", name:"", date:"", time:"", partySize:"", confirmNo:"", address:"", notes:"", assignedTo:"" });
   const [resvFilterType, setResvFilterType] = useState("all");
-  const RESV_URL = "https://pulse-family-default-rtdb.firebaseio.com/reservations";
+  const _resvUserKey = (fwUser?.email || "shared").replace(/[.#$[\]]/g, ",");
+  const RESV_URL = `https://pulse-family-default-rtdb.firebaseio.com/reservations/${_resvUserKey}`;
   const TODO_URL = "https://pulse-family-default-rtdb.firebaseio.com/todos";
   const RESV_TYPES = [
     { id:"✈️ Flight",     label:"Flight",      emoji:"✈️", color:"#6366F1" },
@@ -1951,7 +1952,8 @@ export default function PulseApp() {
   const [clothingLoading, setClothingLoading] = useState(false);
   const [clothingMember, setClothingMember] = useState("all");
   const [clothingCategory, setClothingCategory] = useState("all");
-  const CLOTHING_URL = "https://pulse-family-default-rtdb.firebaseio.com/clothing";
+  const _clothUserKey = (fwUser?.email || "shared").replace(/[.#$[\]]/g, ",");
+  const CLOTHING_URL = `https://pulse-family-default-rtdb.firebaseio.com/clothing/${_clothUserKey}`;
   const CLOTHING_CATEGORIES = [
     { id:"all",        label:"All",       emoji:"👔", color:"#888" },
     { id:"Tops",       label:"Tops",      emoji:"👢", color:"#F43F5E" },
@@ -2035,6 +2037,56 @@ export default function PulseApp() {
   const SF_DATA_KEY = "pulse_sf_data";
   const SF_DRIVE_KEY = "pulse_sf_drive_id"; // personal Drive file ID
   const [sfDriveFileId, setSfDriveFileId] = useState(() => localStorage.getItem(SF_DRIVE_KEY) || null);
+
+  // ─── PERSONAL SETTINGS DRIVE FILE ────────────────────────────────────────
+  const SETTINGS_DRIVE_KEY = "pulse_settings_drive_id";
+  const [settingsDriveFileId, setSettingsDriveFileId] = useState(() => localStorage.getItem(SETTINGS_DRIVE_KEY) || null);
+
+  async function settingsInitDriveFile(token) {
+    const cached = localStorage.getItem(SETTINGS_DRIVE_KEY);
+    if (cached) { setSettingsDriveFileId(cached); return cached; }
+    const q = encodeURIComponent("name='PulseSettings.json' and 'root' in parents and trashed=false");
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,ownedByMe)`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const d = await res.json();
+    const owned = (d.files || []).find(f => f.ownedByMe);
+    if (owned) {
+      localStorage.setItem(SETTINGS_DRIVE_KEY, owned.id);
+      setSettingsDriveFileId(owned.id);
+      return owned.id;
+    }
+    const form = new FormData();
+    form.append("metadata", new Blob([JSON.stringify({ name: "PulseSettings.json", parents: ["root"] })], { type: "application/json" }));
+    form.append("file", new Blob(["{}"], { type: "application/json" }));
+    const cr = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+      method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form
+    });
+    const cd = await cr.json();
+    if (cd.id) {
+      localStorage.setItem(SETTINGS_DRIVE_KEY, cd.id);
+      setSettingsDriveFileId(cd.id);
+      return cd.id;
+    }
+    return null;
+  }
+
+  async function saveSettingsToDrive(patch) {
+    if (!fwToken) return;
+    try {
+      const fileId = await settingsInitDriveFile(fwToken);
+      if (!fileId) return;
+      const existing = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${fwToken}` }
+      }).then(r => r.text()).then(t => { try { return JSON.parse(t); } catch { return {}; } }).catch(() => ({}));
+      const updated = { ...existing, ...patch };
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${fwToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(updated)
+      });
+    } catch(e) {}
+  }
 
   // Initialize personal vault file on user's own Drive (not shared workspace)
   async function sfInitDriveFile(token) {
@@ -3055,6 +3107,26 @@ export default function PulseApp() {
         }
       });
     }
+    // Load personal settings from Drive on login (cross-device sync)
+    if (fwToken) {
+      settingsInitDriveFile(fwToken).then(fileId => {
+        if (!fileId) return;
+        fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+          headers: { Authorization: `Bearer ${fwToken}` }
+        }).then(r => r.text()).then(t => {
+          try {
+            const s = JSON.parse(t);
+            if (s.reminderWindow)  { setReminderWindow(s.reminderWindow);  localStorage.setItem("pulse_reminder_window", s.reminderWindow); }
+            if (s.notifSound)      { setNotifSound(s.notifSound);          localStorage.setItem("pulse_notif_sound", s.notifSound); }
+            if (s.secondCountry)   { const c = SECOND_COUNTRY_OPTIONS.find(x => x.key === s.secondCountry); if (c) { setSecondCountry(c); localStorage.setItem("pulse_second_country", s.secondCountry); } }
+            if (s.pcCycleLength)   { setPcCycleLength(parseInt(s.pcCycleLength,10)); localStorage.setItem("pulse_pc_cycle", s.pcCycleLength); }
+            if (s.pcPeriodLength)  { setPcPeriodLength(parseInt(s.pcPeriodLength,10)); localStorage.setItem("pulse_pc_period_len", s.pcPeriodLength); }
+            if (s.pingEncrypt !== undefined) { setPingEncryptEnabled(s.pingEncrypt === true); localStorage.setItem("pulse_ping_encrypt", s.pingEncrypt ? "true" : "false"); }
+          } catch(e) {}
+        }).catch(()=>{});
+      }).catch(()=>{});
+    }
+
     // Load secure vault from personal Drive (not shared workspace)
     if (fwToken) {
       sfInitDriveFile(fwToken).then(fileId => {
@@ -6453,9 +6525,9 @@ export default function PulseApp() {
                     <div style={{flex:1}}>
                       <div style={{fontSize:10,color:T.textFaint,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Period Length</div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div onClick={()=>{const v=Math.max(2,pcPeriodLength-1);setPcPeriodLength(v);localStorage.setItem("pulse_pc_period_len",v);}} style={{width:28,height:28,borderRadius:8,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,fontWeight:700,color:T.text}}>−</div>
+                        <div onClick={()=>{const v=Math.max(2,pcPeriodLength-1);setPcPeriodLength(v);localStorage.setItem("pulse_pc_period_len",v);saveSettingsToDrive({pcPeriodLength:v});}} style={{width:28,height:28,borderRadius:8,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,fontWeight:700,color:T.text}}>−</div>
                         <span style={{fontSize:20,fontWeight:900,color:"#EC4899",minWidth:30,textAlign:"center"}}>{pcPeriodLength}</span>
-                        <div onClick={()=>{const v=Math.min(10,pcPeriodLength+1);setPcPeriodLength(v);localStorage.setItem("pulse_pc_period_len",v);}} style={{width:28,height:28,borderRadius:8,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,fontWeight:700,color:T.text}}>+</div>
+                        <div onClick={()=>{const v=Math.min(10,pcPeriodLength+1);setPcPeriodLength(v);localStorage.setItem("pulse_pc_period_len",v);saveSettingsToDrive({pcPeriodLength:v});}} style={{width:28,height:28,borderRadius:8,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,fontWeight:700,color:T.text}}>+</div>
                         <span style={{fontSize:10,color:T.textFaint}}>days</span>
                       </div>
                     </div>
@@ -7026,7 +7098,7 @@ export default function PulseApp() {
                   </div>
                 </div>
                 {SECOND_COUNTRY_OPTIONS.map((c, i) => (
-                  <div key={c.key} onClick={() => { setSecondCountry(c); localStorage.setItem("pulse_second_country", c.key); }}
+                  <div key={c.key} onClick={() => { setSecondCountry(c); localStorage.setItem("pulse_second_country", c.key); saveSettingsToDrive({ secondCountry: c.key }); }}
                     style={{display:"flex",alignItems:"center",padding:"12px 16px",cursor:"pointer",
                       borderBottom:i<SECOND_COUNTRY_OPTIONS.length-1?`1px solid ${T.border}`:"none",
                       background:secondCountry.key===c.key?(isDark?"rgba(59,130,246,0.13)":"rgba(59,130,246,0.06)"):"transparent",
@@ -7056,7 +7128,7 @@ export default function PulseApp() {
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
                   {["1 Hour","3 Hours","6 Hours","12 Hours","1 Day","2 Days"].map(opt => (
-                    <div key={opt} onClick={() => { setReminderWindow(opt); localStorage.setItem("pulse_reminder_window", opt); }} style={{flex:"1 1 calc(33.33% - 6px)",minWidth:80,textAlign:"center",padding:"10px 0",borderRadius:12,cursor:"pointer",fontWeight:700,fontSize:13,transition:"all 0.2s",background:reminderWindow===opt?"linear-gradient(135deg,#3B82F6,#2563EB)":(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:reminderWindow===opt?"#fff":T.text,border:reminderWindow===opt?"none":`1px solid ${T.border}`,boxShadow:reminderWindow===opt?"0 2px 8px rgba(59,130,246,0.3)":"none"}}>
+                    <div key={opt} onClick={() => { setReminderWindow(opt); localStorage.setItem("pulse_reminder_window", opt); saveSettingsToDrive({ reminderWindow: opt }); }} style={{flex:"1 1 calc(33.33% - 6px)",minWidth:80,textAlign:"center",padding:"10px 0",borderRadius:12,cursor:"pointer",fontWeight:700,fontSize:13,transition:"all 0.2s",background:reminderWindow===opt?"linear-gradient(135deg,#3B82F6,#2563EB)":(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:reminderWindow===opt?"#fff":T.text,border:reminderWindow===opt?"none":`1px solid ${T.border}`,boxShadow:reminderWindow===opt?"0 2px 8px rgba(59,130,246,0.3)":"none"}}>
                       {opt}
                     </div>
                   ))}
@@ -7081,6 +7153,7 @@ export default function PulseApp() {
                     const next = !pingEncryptEnabled;
                     setPingEncryptEnabled(next);
                     localStorage.setItem("pulse_ping_encrypt", next ? "true" : "false");
+                    saveSettingsToDrive({ pingEncrypt: next });
                     if (!next) {
                       sessionStorage.removeItem("pulse_ping_pass");
                       setPingPassword("PulseDefaultKey2026");
@@ -7141,7 +7214,7 @@ export default function PulseApp() {
                   <div style={{fontSize:16,fontWeight:800,color:T.text}}>Notification Sound</div>
                 </div>
                 {["Default Beep","Crystal Chime","Heartbeat Pulse","Silent"].map((snd, i) => (
-                  <div key={snd} onClick={() => { setNotifSound(snd); localStorage.setItem("pulse_notif_sound", snd); }} style={{display:"flex",alignItems:"center",padding:"13px 16px",cursor:"pointer",borderBottom:i<3?`1px solid ${T.border}`:"none",background:notifSound===snd?(isDark?"rgba(168,85,247,0.13)":"rgba(168,85,247,0.08)"):"transparent",transition:"background 0.2s",borderLeft:notifSound===snd?"3px solid #A855F7":"3px solid transparent"}}>
+                  <div key={snd} onClick={() => { setNotifSound(snd); localStorage.setItem("pulse_notif_sound", snd); saveSettingsToDrive({ notifSound: snd }); }} style={{display:"flex",alignItems:"center",padding:"13px 16px",cursor:"pointer",borderBottom:i<3?`1px solid ${T.border}`:"none",background:notifSound===snd?(isDark?"rgba(168,85,247,0.13)":"rgba(168,85,247,0.08)"):"transparent",transition:"background 0.2s",borderLeft:notifSound===snd?"3px solid #A855F7":"3px solid transparent"}}>
                     <div style={{flex:1,fontSize:14,fontWeight:notifSound===snd?700:500,color:notifSound===snd?"#A855F7":T.text}}>{snd}</div>
                     {notifSound===snd && <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A855F7" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
                   </div>
