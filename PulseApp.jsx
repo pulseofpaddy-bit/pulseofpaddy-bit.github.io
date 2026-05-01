@@ -2748,14 +2748,14 @@ export default function PulseApp() {
 
   async function pingFindDriveFile(folderName, fileName, token) {
     const q1 = encodeURIComponent(`name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q1}`, {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q1}&includeItemsFromAllDrives=true&supportsAllDrives=true`, {
       headers:{ Authorization:`Bearer ${token}` }
     });
     const d = await res.json();
     const folder = d.files?.[0];
     if (!folder) return null;
     const q2 = encodeURIComponent(`'${folder.id}' in parents and name='${fileName}' and trashed=false`);
-    const res2 = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q2}`, {
+    const res2 = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q2}&includeItemsFromAllDrives=true&supportsAllDrives=true`, {
       headers:{ Authorization:`Bearer ${token}` }
     });
     const d2 = await res2.json();
@@ -3262,14 +3262,22 @@ export default function PulseApp() {
         const encrypted = await pingReadDriveFile(found.fileId, pingToken);
         if (encrypted) {
           const plain = await pingDecrypt(encrypted, pingPassword);
-          if (plain) { setPingMessages(JSON.parse(plain)); }
+          // Only update messages if we successfully decrypted real content
+          if (plain) {
+            try {
+              const parsed = JSON.parse(plain);
+              if (Array.isArray(parsed)) setPingMessages(parsed);
+            } catch {}
+          }
+          // If decryption failed, keep existing messages — do NOT clear
         }
+        // If no encrypted content returned, keep existing messages — do NOT clear
       } else {
-        // Also check Firebase for folder reference from other user
+        // Folder not found in own Drive — check Firebase for folder reference from other user
         const chatData = await fetch(`${PING_CHATS}/${chat.id}.json`).then(r=>r.json()).catch(()=>null);
         if (chatData?.folderId) {
-          const q3 = encodeURIComponent(`'${chatData.folderId}' in parents and name='messages.json'`);
-          const res2 = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q3}`, {
+          const q3 = encodeURIComponent(`'${chatData.folderId}' in parents and name='messages.json' and trashed=false`);
+          const res2 = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q3}&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
             headers:{ Authorization:`Bearer ${pingToken}` }
           });
           const d2 = await res2.json();
@@ -3277,14 +3285,23 @@ export default function PulseApp() {
             const encrypted = await pingReadDriveFile(d2.files[0].id, pingToken);
             if (encrypted) {
               const plain = await pingDecrypt(encrypted, pingPassword);
-              if (plain) setPingMessages(JSON.parse(plain));
+              if (plain) {
+                try {
+                  const parsed = JSON.parse(plain);
+                  if (Array.isArray(parsed)) setPingMessages(parsed);
+                } catch {}
+              }
             }
           }
-        } else {
-          setPingMessages([]);
+          // If folder exists in Firebase but file not found yet, keep existing messages — do NOT clear
         }
+        // If no Firebase reference either, this is a brand new chat — keep existing messages (may be optimistic)
+        // NEVER call setPingMessages([]) here — it would wipe optimistically-added messages
       }
-    } catch(e) { setPingMessages([]); }
+    } catch(e) {
+      // On error, keep existing messages — do NOT clear
+      console.warn("pingLoadMessages error:", e);
+    }
     setPingLoading(false);
   }
 
@@ -3296,7 +3313,10 @@ export default function PulseApp() {
     const newMsgs = [...pingMessages, msg];
     setPingMessages(newMsgs);
     setTimeout(()=>{ if(pingMsgRef.current) pingMsgRef.current.scrollTop=pingMsgRef.current.scrollHeight; },50);
+    // Save to Drive — messages are already shown optimistically above
+    // After save, do NOT reload from Drive immediately (would race with indexing latency)
     await pingSaveMessages(pingActiveChat.id, newMsgs, pingToken);
+    // Notify other user via Firebase
     fetch(`${PING_CHATS}/${pingActiveChat.id}/notify.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ from: pingMe.email, ts: Date.now() }) }).catch(()=>{});
   }
 
@@ -3399,7 +3419,8 @@ export default function PulseApp() {
 
   useEffect(() => {
     if (mainTab !== "ping" || pingScreen !== "chat" || !pingActiveChat) return;
-    const interval = setInterval(()=>pingLoadMessages(pingActiveChat), 5000);
+    // Poll every 10s — 5s was too fast and caused race conditions with Drive API indexing
+    const interval = setInterval(()=>pingLoadMessages(pingActiveChat), 10000);
     return () => clearInterval(interval);
   }, [mainTab, pingScreen, pingActiveChat?.id]);
 
