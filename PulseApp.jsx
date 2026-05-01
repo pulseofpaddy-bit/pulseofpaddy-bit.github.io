@@ -2677,22 +2677,25 @@ export default function PulseApp() {
 
   // ─── Auto-bridge existing Google auth into PingMe ────────────────────────────────────────
   useEffect(() => {
-    if (mainTab === "ping" && !pingMe && fwUser && fwToken) {
-      const user = { email: fwUser.email, name: fwUser.name, photo: fwUser.photo, id: fwUser.id || fwUser.email.replace(/[^a-zA-Z0-9]/g,"") };
+    if (!fwUser || !fwToken) return;
+    const user = { email: fwUser.email, name: fwUser.name, photo: fwUser.photo, id: fwUser.id || fwUser.email.replace(/[^a-zA-Z0-9]/g,"") };
+    // Always register/refresh in Firebase whenever fwUser is available (on every app load)
+    // This ensures the user appears in other family members' contact lists
+    fetch(`${PING_BASE}/users/${user.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
+    if (!pingMe) {
       setPingMe(user);
       setPingToken(fwToken);
       localStorage.setItem("pulse_ping_user", JSON.stringify(user));
       localStorage.setItem("pulse_ping_token", fwToken);
-      // Register in Firebase
-      fetch(`${PING_BASE}/users/${user.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
-      // Go straight to home — no password needed unless encryption enabled
-      if (pingEncryptEnabled && !sessionStorage.getItem("pulse_ping_pass")) {
-        setPingScreen("setPassword");
-      } else {
-        setPingScreen("home");
+      if (mainTab === "ping") {
+        if (pingEncryptEnabled && !sessionStorage.getItem("pulse_ping_pass")) {
+          setPingScreen("setPassword");
+        } else {
+          setPingScreen("home");
+        }
       }
     }
-  }, [mainTab, pingMe, fwUser, fwToken]);
+  }, [fwUser?.email, fwToken]);
 
   // ─── Drive Helpers ────────────────────────────────────────
   async function pingCreateDriveFolder(folderName, token) {
@@ -3341,8 +3344,21 @@ export default function PulseApp() {
         fetch(`${PING_USERS}.json`).then(r=>r.ok?r.json():null),
         fetch(`${PING_PRESENCE}.json`).then(r=>r.ok?r.json():null),
       ]);
-      if (ur) setPingUsers(Object.values(ur).filter(u=>u.email!==pingMe?.email));
       if (pr) setPingOnline(pr);
+      // Build contact list from family members (fwMembers) — not all global Firebase users
+      // This ensures only YOUR family appears in contacts
+      const familyEmails = (fwMembers||[]).map(m=>m.email).filter(e=>e!==pingMe?.email);
+      const firebaseUsers = ur ? Object.values(ur) : [];
+      // For each family member, use Firebase data if available, else fall back to fwMembers data
+      const contacts = familyEmails.map(email => {
+        const fb = firebaseUsers.find(u=>u.email===email);
+        const fm = (fwMembers||[]).find(m=>m.email===email);
+        if (fb) return fb;
+        // Not in Firebase yet — create a placeholder from fwMembers so they still appear
+        if (fm) return { email: fm.email, name: fm.name, photo: fm.photo||null, id: fm.email.replace(/[^a-zA-Z0-9]/g,""), updatedAt: 0 };
+        return null;
+      }).filter(Boolean);
+      setPingUsers(contacts);
     } catch(e) {}
   }
 
@@ -3373,6 +3389,13 @@ export default function PulseApp() {
     const interval = setInterval(()=>{ pingUpdatePresence(); pingLoadUsers(); }, 30000);
     return () => clearInterval(interval);
   }, [mainTab, pingMe?.email]);
+
+  // Refresh contacts when family member list changes (e.g. after Drive sync)
+  useEffect(() => {
+    if (mainTab === "ping" && pingMe && fwMembers.length > 0) {
+      pingLoadUsers();
+    }
+  }, [fwMembers.length]);
 
   useEffect(() => {
     if (mainTab !== "ping" || pingScreen !== "chat" || !pingActiveChat) return;
@@ -5733,8 +5756,8 @@ export default function PulseApp() {
                   {pingGroups.length===0&&pingUsers.length===0&&(
                     <div style={{textAlign:"center",padding:"60px 20px"}}>
                       <div style={{fontSize:48,marginBottom:16,opacity:0.4}}>💬</div>
-                      <div style={{fontSize:16,fontWeight:600,color:T.text,marginBottom:8}}>No chats yet</div>
-                      <div style={{fontSize:13,color:T.textFaint,lineHeight:1.5}}>Invite family members to PULSE<br/>to start messaging</div>
+                      <div style={{fontSize:16,fontWeight:600,color:T.text,marginBottom:8}}>No family contacts yet</div>
+                      <div style={{fontSize:13,color:T.textFaint,lineHeight:1.5}}>{fwMembers.length > 1 ? "Family members found — they need to open the app once to appear here" : "Go to Settings → Family Workspace to add family members first"}</div>
                     </div>
                   )}
 
