@@ -2016,6 +2016,13 @@ export default function PulseApp() {
   const [prRecurrence, setPrRecurrence] = useState("Monthly");
   const [prCategory, setPrCategory] = useState("Bill");
   const [prNotes, setPrNotes] = useState("");
+  // Credit Card specific fields
+  const [prCardLast4, setPrCardLast4] = useState("");
+  const [prCardBank, setPrCardBank] = useState("");
+  const [prMinDue, setPrMinDue] = useState("");
+  const [prTotalDue, setPrTotalDue] = useState("");
+  const [prStatementDate, setPrStatementDate] = useState("");
+  const [prCreditLimit, setPrCreditLimit] = useState("");
   // Money Lent
   const [moneyLent, setMoneyLent] = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_money_lent")||"[]"); } catch { return []; } });
   const [mlShowAdd, setMlShowAdd] = useState(false);
@@ -2031,13 +2038,34 @@ export default function PulseApp() {
   function mlSave(items) { setMoneyLent(items); localStorage.setItem("pulse_money_lent", JSON.stringify(items)); if (fwWorkspace?.fileIds?.moneyLent && fwToken) fwWriteFile(fwWorkspace.fileIds.moneyLent, items, fwToken); }
 
   function prSubmit() {
-    if (!prName.trim() || !prAmount || !prDueDate) return;
-    const entry = { id: prEditId || Date.now().toString(), name: prName.trim(), amount: parseFloat(prAmount), currency: prCurrency, dueDate: prDueDate, recurrence: prRecurrence, category: prCategory, notes: prNotes.trim(), paid: false };
+    if (!prName.trim() || !prDueDate) return;
+    if (prCategory !== "Credit Card" && !prAmount) return;
+    const ccFields = prCategory === "Credit Card" ? {
+      cardLast4: prCardLast4.trim(), cardBank: prCardBank.trim(),
+      minDue: parseFloat(prMinDue||"0"), totalDue: parseFloat(prTotalDue||"0"),
+      statementDate: prStatementDate, creditLimit: parseFloat(prCreditLimit||"0")
+    } : {};
+    const entry = { id: prEditId || Date.now().toString(), name: prName.trim(),
+      amount: prCategory === "Credit Card" ? parseFloat(prTotalDue||"0") : parseFloat(prAmount),
+      currency: prCurrency, dueDate: prDueDate, recurrence: prRecurrence,
+      category: prCategory, notes: prNotes.trim(), paid: false, ...ccFields };
     const updated = prEditId ? payReminders.map(r => r.id === prEditId ? entry : r) : [entry, ...payReminders];
     prSave(updated);
     setPrShowAdd(false); setPrEditId(null); setPrName(""); setPrAmount(""); setPrCurrency("USD"); setPrDueDate(""); setPrRecurrence("Monthly"); setPrCategory("Bill"); setPrNotes("");
+    setPrCardLast4(""); setPrCardBank(""); setPrMinDue(""); setPrTotalDue(""); setPrStatementDate(""); setPrCreditLimit("");
   }
-  function prEdit(r) { setPrEditId(r.id); setPrName(r.name); setPrAmount(String(r.amount)); setPrCurrency(r.currency||"USD"); setPrDueDate(r.dueDate); setPrRecurrence(r.recurrence||"Monthly"); setPrCategory(r.category||"Bill"); setPrNotes(r.notes||""); setPrShowAdd(true); }
+  function prEdit(r) {
+    setPrEditId(r.id); setPrName(r.name); setPrAmount(String(r.amount)); setPrCurrency(r.currency||"USD");
+    setPrDueDate(r.dueDate); setPrRecurrence(r.recurrence||"Monthly"); setPrCategory(r.category||"Bill"); setPrNotes(r.notes||"");
+    if (r.category === "Credit Card") {
+      setPrCardLast4(r.cardLast4||""); setPrCardBank(r.cardBank||"");
+      setPrMinDue(String(r.minDue||"")); setPrTotalDue(String(r.totalDue||""));
+      setPrStatementDate(r.statementDate||""); setPrCreditLimit(String(r.creditLimit||""));
+    } else {
+      setPrCardLast4(""); setPrCardBank(""); setPrMinDue(""); setPrTotalDue(""); setPrStatementDate(""); setPrCreditLimit("");
+    }
+    setPrShowAdd(true);
+  }
   function prDelete(id) { prSave(payReminders.filter(r => r.id !== id)); }
   function prTogglePaid(id) { prSave(payReminders.map(r => r.id === id ? { ...r, paid: !r.paid } : r)); }
 
@@ -7069,7 +7097,7 @@ export default function PulseApp() {
                 {prShowAdd && (
                   <div style={{background:T.bgCard,borderRadius:18,border:`1.5px solid ${T.border}`,padding:"18px",marginBottom:16}}>
                     <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:16}}>{prEditId?"Edit Reminder":"Add Reminder"}</div>
-                    <div style={{marginBottom:12}}><label style={labelStyle}>Bill / Subscription Name *</label><input value={prName} onChange={e=>setPrName(e.target.value)} placeholder="e.g. Netflix, Electricity, Rent" style={inputStyle}/></div>
+                    <div style={{marginBottom:12}}><label style={labelStyle}>{prCategory === "Credit Card" ? "Card Name / Bank *" : "Bill / Subscription Name *"}</label><input value={prName} onChange={e=>setPrName(e.target.value)} placeholder={prCategory === "Credit Card" ? "e.g. Chase Sapphire, HDFC Regalia" : "e.g. Netflix, Electricity, Rent"} style={inputStyle}/></div>
                     <div style={{display:"flex",gap:10,marginBottom:12}}>
                       <div style={{flex:1}}><label style={labelStyle}>Amount *</label><input type="number" value={prAmount} onChange={e=>setPrAmount(e.target.value)} placeholder="0.00" style={inputStyle}/></div>
                       <div style={{width:100}}><label style={labelStyle}>Currency</label>
@@ -7086,9 +7114,26 @@ export default function PulseApp() {
                     </div>
                     <div style={{marginBottom:12}}><label style={labelStyle}>Category</label>
                       <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                        {["Bill","Subscription","Rent","Insurance","Loan","Other"].map(c=>(<div key={c} onClick={()=>setPrCategory(c)} style={{padding:"8px 12px",borderRadius:10,fontWeight:700,fontSize:12,cursor:"pointer",background:prCategory===c?"linear-gradient(135deg,#F59E0B,#D97706)":(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:prCategory===c?"#fff":T.text,border:prCategory===c?"none":`1px solid ${T.border}`}}>{c}</div>))}
+                        {["Bill","Subscription","Rent","Insurance","Loan","Credit Card","Other"].map(c=>(<div key={c} onClick={()=>setPrCategory(c)} style={{padding:"8px 12px",borderRadius:10,fontWeight:700,fontSize:12,cursor:"pointer",background:prCategory===c?"linear-gradient(135deg,#F59E0B,#D97706)":(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)"),color:prCategory===c?"#fff":T.text,border:prCategory===c?"none":`1px solid ${T.border}`}}>{c}</div>))}
                       </div>
                     </div>
+                    {prCategory === "Credit Card" && (
+                      <div style={{background:isDark?"rgba(99,102,241,0.08)":"rgba(99,102,241,0.05)",borderRadius:14,padding:"14px",marginBottom:12,border:`1px solid ${isDark?"rgba(99,102,241,0.2)":"rgba(99,102,241,0.15)"}`}}>
+                        <div style={{fontSize:12,fontWeight:800,color:"#6366F1",marginBottom:12,textTransform:"uppercase",letterSpacing:"0.06em"}}>💳 Credit Card Details</div>
+                        <div style={{display:"flex",gap:10,marginBottom:10}}>
+                          <div style={{flex:1}}><label style={labelStyle}>Bank / Issuer</label><input value={prCardBank} onChange={e=>setPrCardBank(e.target.value)} placeholder="e.g. Chase, HDFC, Citi" style={inputStyle}/></div>
+                          <div style={{width:110}}><label style={labelStyle}>Last 4 Digits</label><input value={prCardLast4} onChange={e=>setPrCardLast4(e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="1234" maxLength={4} style={inputStyle}/></div>
+                        </div>
+                        <div style={{display:"flex",gap:10,marginBottom:10}}>
+                          <div style={{flex:1}}><label style={labelStyle}>Total Due *</label><input type="number" value={prTotalDue} onChange={e=>setPrTotalDue(e.target.value)} placeholder="0.00" style={inputStyle}/></div>
+                          <div style={{flex:1}}><label style={labelStyle}>Minimum Due</label><input type="number" value={prMinDue} onChange={e=>setPrMinDue(e.target.value)} placeholder="0.00" style={inputStyle}/></div>
+                        </div>
+                        <div style={{display:"flex",gap:10}}>
+                          <div style={{flex:1}}><label style={labelStyle}>Statement Date</label><input type="date" value={prStatementDate} onChange={e=>setPrStatementDate(e.target.value)} style={inputStyle}/></div>
+                          <div style={{flex:1}}><label style={labelStyle}>Credit Limit</label><input type="number" value={prCreditLimit} onChange={e=>setPrCreditLimit(e.target.value)} placeholder="0.00" style={inputStyle}/></div>
+                        </div>
+                      </div>
+                    )}
                     <div style={{marginBottom:16}}><label style={labelStyle}>Notes (optional)</label><input value={prNotes} onChange={e=>setPrNotes(e.target.value)} placeholder="Any extra details..." style={inputStyle}/></div>
                     <div style={{display:"flex",gap:10}}>
                       <div onClick={()=>setPrShowAdd(false)} style={{flex:1,padding:"13px",borderRadius:12,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",color:T.text,fontWeight:700,fontSize:14,textAlign:"center",cursor:"pointer",border:`1px solid ${T.border}`}}>Cancel</div>
@@ -7107,6 +7152,7 @@ export default function PulseApp() {
                 )}
                 {payReminders.map(r => {
                   const isOverdue = !r.paid && r.dueDate < today;
+                  const isCreditCard = r.category === "Credit Card";
                   const isDueToday = !r.paid && r.dueDate === today;
                   const daysUntil = Math.ceil((new Date(r.dueDate+"T00:00:00") - new Date(today+"T00:00:00")) / 86400000);
                   return (
@@ -7127,6 +7173,14 @@ export default function PulseApp() {
                         </div>
                         <div style={{fontSize:11,color:T.textFaint,marginTop:4}}>Due: {new Date(r.dueDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
                         {r.notes && <div style={{fontSize:11,color:T.textFaint,marginTop:2,fontStyle:"italic"}}>{r.notes}</div>}
+                        {isCreditCard && (
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
+                            {r.cardBank && <span style={{fontSize:11,padding:"3px 8px",borderRadius:8,background:"rgba(99,102,241,0.10)",color:"#6366F1",fontWeight:700}}>{r.cardBank}{r.cardLast4?" ···"+r.cardLast4:""}</span>}
+                            {r.totalDue>0 && <span style={{fontSize:11,padding:"3px 8px",borderRadius:8,background:"rgba(239,68,68,0.10)",color:"#EF4444",fontWeight:700}}>Total: {(r.currency==="INR"?"₹":"$")+Number(r.totalDue).toLocaleString()}</span>}
+                            {r.minDue>0 && <span style={{fontSize:11,padding:"3px 8px",borderRadius:8,background:"rgba(245,158,11,0.10)",color:"#F59E0B",fontWeight:700}}>Min: {(r.currency==="INR"?"₹":"$")+Number(r.minDue).toLocaleString()}</span>}
+                            {r.creditLimit>0 && <span style={{fontSize:11,padding:"3px 8px",borderRadius:8,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",color:T.textFaint,fontWeight:600}}>Limit: {(r.currency==="INR"?"₹":"$")+Number(r.creditLimit).toLocaleString()}</span>}
+                          </div>
+                        )}
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
                         <div onClick={()=>prEdit(r)} style={{width:30,height:30,borderRadius:8,background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></div>
