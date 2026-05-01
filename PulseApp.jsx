@@ -2693,11 +2693,72 @@ export default function PulseApp() {
         } else {
           setPingScreen("home");
         }
-      }
-    }
-  }, [fwUser?.email, fwToken]);
+      }  }, [fwUser?.email, fwToken]);
 
-  // ─── Drive Helpers ────────────────────────────────────────
+  // ─── PingMe Notifications ────────────────────────────────────────────────
+  const pingLastNotifTs = useRef(Date.now());
+
+  // Register service worker and request notification permission when user logs in
+  useEffect(() => {
+    if (!fwUser) return;
+    // Register service worker for background notifications
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
+        .then(reg => {
+          // Tell service worker the user's email for background polling
+          if (reg.active) reg.active.postMessage({ type: 'SET_USER_EMAIL', email: fwUser.email });
+          else if (reg.installing) reg.installing.addEventListener('statechange', () => {
+            if (reg.active) reg.active.postMessage({ type: 'SET_USER_EMAIL', email: fwUser.email });
+          });
+          // Register periodic sync if supported (Android Chrome)
+          if ('periodicSync' in reg) {
+            reg.periodicSync.register('pingme-check', { minInterval: 15 * 60 * 1000 }).catch(()=>{});
+          }
+        }).catch(()=>{});
+    }
+    // Request notification permission (non-intrusively, only if not decided yet)
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      // Delay 3s so it doesn't feel like an immediate popup
+      setTimeout(() => {
+        Notification.requestPermission().catch(()=>{});
+      }, 3000);
+    }
+  }, [fwUser?.email]);
+
+  // Poll Firebase for new notifications every 15 seconds when app is open
+  useEffect(() => {
+    if (!pingMe) return;
+    const checkNotifs = async () => {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      if (document.visibilityState === 'visible' && mainTab === 'ping' && pingScreen === 'chat') return; // Already in chat, no need
+      try {
+        const safeEmail = pingMe.email.replace(/[.@]/g, '_');
+        const res = await fetch(`${PING_BASE}/notifications/${safeEmail}.json`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data) return;
+        const entries = Object.entries(data)
+          .map(([k, v]) => ({ key: k, ...v }))
+          .filter(n => n.ts > pingLastNotifTs.current);
+        for (const n of entries) {
+          new Notification(`💬 ${n.fromName || 'Family member'}`, {
+            body: n.preview ? `"${n.preview}"` : 'Sent you a message in PingMe',
+            icon: '/icon-192.png',
+            badge: '/icon-192.png',
+            tag: `pingme-${n.chatId}`,
+          });
+        }
+        if (entries.length > 0) {
+          pingLastNotifTs.current = Math.max(...entries.map(n => n.ts));
+        }
+      } catch(e) {}
+    };
+    checkNotifs();
+    const interval = setInterval(checkNotifs, 15000);
+    return () => clearInterval(interval);
+  }, [pingMe?.email]);
+
+  // ─── Drive Helpers ────────────────────────────────────────────────
   async function pingCreateDriveFolder(folderName, token) {
     const res = await fetch("https://www.googleapis.com/drive/v3/files", {
       method:"POST",
@@ -3309,15 +3370,35 @@ export default function PulseApp() {
     const text = pingInput.trim();
     if (!text || !pingActiveChat || !pingMe || !pingPassword) return;
     setPingInput("");
-    const msg  = { id: Date.now(), text, from: pingMe.email, fromName: pingMe.name, ts: Date.now(), read: false };
+    const ts = Date.now();
+    const msg  = { id: ts, text, from: pingMe.email, fromName: pingMe.name, ts, read: false };
     const newMsgs = [...pingMessages, msg];
     setPingMessages(newMsgs);
     setTimeout(()=>{ if(pingMsgRef.current) pingMsgRef.current.scrollTop=pingMsgRef.current.scrollHeight; },50);
     // Save to Drive — messages are already shown optimistically above
-    // After save, do NOT reload from Drive immediately (would race with indexing latency)
     await pingSaveMessages(pingActiveChat.id, newMsgs, pingToken);
-    // Notify other user via Firebase
-    fetch(`${PING_CHATS}/${pingActiveChat.id}/notify.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ from: pingMe.email, ts: Date.now() }) }).catch(()=>{});
+    // Write notification record for each recipient so they get browser/push notification
+    const recipients = pingActiveChat.type === 'group'
+      ? (pingActiveChat.members || []).filter(e => e !== pingMe.email)
+      : [pingActiveChat.otherEmail].filter(Boolean);
+    for (const recipientEmail of recipients) {
+      const safeEmail = recipientEmail.replace(/[.@]/g, '_');
+      const notifKey = `${ts}_${pingMe.id || pingMe.email.replace(/[^a-zA-Z0-9]/g,'')}`;
+      fetch(`${PING_BASE}/notifications/${safeEmail}/${notifKey}.json`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId: pingActiveChat.id,
+          chatName: pingActiveChat.name,
+          from: pingMe.email,
+          fromName: pingMe.name,
+          preview: text.length > 60 ? text.slice(0, 60) + '…' : text,
+          ts,
+        })
+      }).catch(()=>{});
+    }
+    // Legacy notify flag
+    fetch(`${PING_CHATS}/${pingActiveChat.id}/notify.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ from: pingMe.email, ts }) }).catch(()=>{});
   }
 
   function pingChatId(emailA, emailB) {
@@ -7014,6 +7095,32 @@ export default function PulseApp() {
                 )}
               </div>
 
+              {/* PingMe Notifications */}
+              <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
+                <span>💬</span> PingMe Notifications
+              </div>
+              <div style={{background:T.bgCard,borderRadius:16,border:`1px solid ${T.border}`,overflow:"hidden",marginBottom:20}}>
+                <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px"}}>
+                  <div style={{width:34,height:34,borderRadius:10,background:"rgba(20,184,166,0.12)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#14B8A6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:700,color:T.text}}>Message Notifications</div>
+                    <div style={{fontSize:12,color:T.textMuted,marginTop:2}}>
+                      {typeof Notification === 'undefined' ? 'Not supported on this device' :
+                       Notification.permission === 'granted' ? '✅ Enabled — you\'ll get notified of new messages' :
+                       Notification.permission === 'denied' ? '❌ Blocked — enable in browser settings' :
+                       'Tap to enable message notifications'}
+                    </div>
+                  </div>
+                  {typeof Notification !== 'undefined' && Notification.permission !== 'granted' && Notification.permission !== 'denied' && (
+                    <button onClick={()=>Notification.requestPermission()} style={{background:"#14B8A6",color:"#fff",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Enable</button>
+                  )}
+                  {typeof Notification !== 'undefined' && Notification.permission === 'denied' && (
+                    <span style={{fontSize:11,color:"#FF3B5C",fontWeight:600}}>Blocked</span>
+                  )}
+                </div>
+              </div>
               {/* Notification Sound */}
               <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
                 <span>🔔</span> Notification Sound
