@@ -2696,7 +2696,9 @@ export default function PulseApp() {
         } else {
           setPingScreen("home");
         }
-      }  }, [fwUser?.email, fwToken]);
+      }
+    }
+  }, [fwUser?.email, fwToken]);
 
   // ─── PingMe Notifications ────────────────────────────────────────────────
   const pingLastNotifTs = useRef(Date.now());
