@@ -1213,6 +1213,12 @@ export default function PulseApp() {
   useEffect(() => {
     if (mainTab === "grocery") loadGrocery();
   }, [mainTab]);
+  // Poll grocery every 30s when tab is active so family members' additions appear automatically
+  useEffect(() => {
+    if (mainTab !== "grocery") return;
+    const groceryPollId = setInterval(() => { loadGrocery(); }, 30000);
+    return () => clearInterval(groceryPollId);
+  }, [mainTab, fwWorkspace, fwToken]);
 
   async function loadGrocery() {
     setGroceryLoading(true);
@@ -2990,7 +2996,7 @@ export default function PulseApp() {
     const fileIds = {};
     for (const [key, fileName] of Object.entries(WORKSPACE_FILES)) {
       const fq = encodeURIComponent(`'${folderId}' in parents and name='${fileName}' and trashed=false`);
-      const fr = await fetch(`https://www.googleapis.com/drive/v3/files?q=${fq}&fields=files(id,name)`, {
+      const fr = await fetch(`https://www.googleapis.com/drive/v3/files?q=${fq}&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true`, {
         headers:{ Authorization:`Bearer ${token}` }
       });
       const fd = await fr.json();
@@ -3015,7 +3021,7 @@ export default function PulseApp() {
   // Read a JSON file from Drive
   async function fwReadFile(fileId, token) {
     try {
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
         headers:{ Authorization:`Bearer ${token}` }
       });
       if (res.status === 401 || res.status === 403) return null; // token expired — signal caller
@@ -3028,7 +3034,7 @@ export default function PulseApp() {
   // Write a JSON array to a Drive file
   async function fwWriteFile(fileId, data, token) {
     try {
-      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, {
         method:"PATCH",
         headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" },
         body: JSON.stringify(data)
@@ -4816,11 +4822,16 @@ export default function PulseApp() {
                     {groceryItems.filter(i=>!i.done).length} remaining · {groceryItems.filter(i=>i.done).length} done
                   </div>
                 </div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <div onClick={()=>loadGrocery()} style={{fontSize:11,fontWeight:700,color:"#3B82F6",cursor:"pointer",background:"rgba(59,130,246,0.1)",padding:"6px 12px",borderRadius:20,display:"flex",alignItems:"center",gap:4}}>
+                    {groceryLoading ? "⏳" : "🔄"} Sync
+                  </div>
                 {groceryItems.some(i=>i.done) && (
                   <div onClick={clearDoneItems} style={{fontSize:11,fontWeight:700,color:"#FF3B5C",cursor:"pointer",background:"rgba(255,59,92,0.1)",padding:"6px 12px",borderRadius:20}}>
                     Clear Done
                   </div>
                 )}
+                </div>
               </div>
 
               {/* Add item input — shown in header only when All is selected */}
