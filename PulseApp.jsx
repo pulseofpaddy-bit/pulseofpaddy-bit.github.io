@@ -1176,6 +1176,7 @@ export default function PulseApp() {
   const [groceryInput, setGroceryInput] = useState("");
   const [groceryLoading, setGroceryLoading] = useState(false);
   const [groceryStore, setGroceryStore] = useState("all");
+  const groceryWritePending = React.useRef(false); // true while an add/delete write is in-flight — prevents poll from overwriting local state
   const [groceryStores, setGroceryStores] = useState(() => { try { const s = localStorage.getItem("pulse_grocery_stores"); return s ? JSON.parse(s) : GROCERY_STORES_DEFAULT; } catch { return GROCERY_STORES_DEFAULT; } });
   const [showAddStore, setShowAddStore]   = useState(false);
   const [newStoreInput, setNewStoreInput] = useState("");
@@ -1225,10 +1226,8 @@ export default function PulseApp() {
 
   async function loadGrocery(fbUrl) {
     setGroceryLoading(true);
-    // Load from Firebase (real-time shared) — fall back to localStorage cache
-    const cachedItems = localStorage.getItem("pulse_grocery_items");
+    // Load stores from cache immediately
     const cachedStores = localStorage.getItem("pulse_grocery_stores");
-    if (cachedItems) { try { setGroceryItems(JSON.parse(cachedItems)); } catch(e) {} }
     if (cachedStores) { try { setGroceryStores(JSON.parse(cachedStores)); } catch(e) {} }
     try {
       const url = fbUrl || GROCERY_FB;
@@ -1236,11 +1235,23 @@ export default function PulseApp() {
         const res = await fetch(`${url}.json`);
         const data = await res.json();
         if (data && typeof data === "object") {
-          const items = Object.entries(data)
+          const fbItems = Object.entries(data)
             .map(([id, val]) => ({ fbId: id, ...val }))
             .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
-          setGroceryItems(items);
-          localStorage.setItem("pulse_grocery_items", JSON.stringify(items));
+          // Merge: keep any local items that haven't been saved to Firebase yet (no fbId)
+          // but skip the merge if a write is currently in-flight (to avoid race condition)
+          if (!groceryWritePending.current) {
+            setGroceryItems(prev => {
+              const localOnly = prev.filter(i => !i.fbId); // items added locally but not yet in Firebase
+              const merged = [...localOnly, ...fbItems];
+              // Deduplicate by id (local item wins if same id exists)
+              const seen = new Set();
+              const deduped = merged.filter(i => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
+              deduped.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+              localStorage.setItem("pulse_grocery_items", JSON.stringify(deduped));
+              return deduped;
+            });
+          }
         }
         // If data === null, do NOT clear — keep existing items (could be a network blip)
       }
@@ -1259,6 +1270,7 @@ export default function PulseApp() {
     if (folderId) {
       const key = folderId.replace(/[.#$[\]]/g, ",");
       const fbUrl = `${FAMILY_BASE}/${key}/grocery`;
+      groceryWritePending.current = true; // block polling from overwriting while write is in-flight
       try {
         const res = await fetch(`${fbUrl}.json`, {
           method: "POST",
@@ -1274,6 +1286,7 @@ export default function PulseApp() {
           });
         }
       } catch(e) {}
+      groceryWritePending.current = false; // write complete — polling can resume
     }
   }
 
