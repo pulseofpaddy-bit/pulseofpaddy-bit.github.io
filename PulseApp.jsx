@@ -1332,6 +1332,7 @@ export default function PulseApp() {
   const [apptLoading, setApptLoading]   = useState(false);
   const [showApptForm, setShowApptForm] = useState(false);
   const [apptForm, setApptForm]         = useState({ doctor:"", doctorName:"", address:"", member:"", date:"", time:"", notes:"" });
+  const [apptEditId, setApptEditId]     = useState(null); // null = new, string = editing existing
   const [apptFilterMember, setApptFilterMember] = useState("All");
   // familyMembers: logged-in user + workspace members (deduplicated)
   const familyMembers = (() => {
@@ -1364,13 +1365,25 @@ export default function PulseApp() {
 
   async function saveAppt() {
     if (!apptForm.doctor || !apptForm.date) return;
-    const item = { ...apptForm, id: "a_" + Date.now(), done: false, createdAt: Date.now(), addedBy: fwUser?.name || "Family" };
-    setApptItems(prev => { const updated = [...prev, item].sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time)); localStorage.setItem("pulse_appointments", JSON.stringify(updated)); return updated; });
+    const isEdit = !!apptEditId;
     setShowApptForm(false);
+    setApptEditId(null);
     setApptForm({ doctor:"", doctorName:"", address:"", member:"", date:"", time:"", notes:"" });
-    if (fwWorkspace?.fileIds?.appointments && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.appointments, fwToken);
-      await fwWriteFile(fwWorkspace.fileIds.appointments, [...(Array.isArray(current) ? current : []), item], fwToken);
+    if (isEdit) {
+      // Update existing appointment
+      setApptItems(prev => { const updated = prev.map(i => i.id === apptEditId ? { ...i, ...apptForm } : i).sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time)); localStorage.setItem("pulse_appointments", JSON.stringify(updated)); return updated; });
+      if (fwWorkspace?.fileIds?.appointments && fwToken) {
+        const current = await fwReadFile(fwWorkspace.fileIds.appointments, fwToken);
+        await fwWriteFile(fwWorkspace.fileIds.appointments, (Array.isArray(current) ? current : []).map(i => i.id === apptEditId ? { ...i, ...apptForm } : i), fwToken);
+      }
+    } else {
+      // Create new appointment
+      const item = { ...apptForm, id: "a_" + Date.now(), done: false, createdAt: Date.now(), addedBy: fwUser?.name || "Family" };
+      setApptItems(prev => { const updated = [...prev, item].sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time)); localStorage.setItem("pulse_appointments", JSON.stringify(updated)); return updated; });
+      if (fwWorkspace?.fileIds?.appointments && fwToken) {
+        const current = await fwReadFile(fwWorkspace.fileIds.appointments, fwToken);
+        await fwWriteFile(fwWorkspace.fileIds.appointments, [...(Array.isArray(current) ? current : []), item], fwToken);
+      }
     }
   }
 
@@ -5079,10 +5092,10 @@ export default function PulseApp() {
               )}
             </div>
             {showApptForm && (
-              <div style={{position:"absolute",inset:0,zIndex:200,background:isDark?"rgba(0,0,0,0.7)":"rgba(0,0,0,0.4)",display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={()=>setShowApptForm(false)}>
+              <div style={{position:"absolute",inset:0,zIndex:200,background:isDark?"rgba(0,0,0,0.7)":"rgba(0,0,0,0.4)",display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={()=>{setShowApptForm(false);setApptEditId(null);}}>
                 <div style={{background:isDark?"#13151A":"#fff",borderRadius:"24px 24px 0 0",padding:"20px 18px 36px",border:`1px solid ${T.border}`}} onClick={e=>e.stopPropagation()}>
                   <div style={{width:36,height:4,background:isDark?"rgba(255,255,255,0.2)":"rgba(0,0,0,0.15)",borderRadius:2,margin:"0 auto 16px"}}/>
-                  <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:14}}>🩺 New Appointment</div>
+                  <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:14}}>{apptEditId ? "✏️ Edit Appointment" : "🩺 New Appointment"}</div>
 
                   {/* Doctor type */}
                   <div style={{fontSize:11,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",fontWeight:700,marginBottom:6}}>Doctor / Type</div>
@@ -5125,7 +5138,7 @@ export default function PulseApp() {
                   <input value={apptForm.notes} onChange={e=>setApptForm(f=>({...f,notes:e.target.value}))} placeholder="e.g. Annual checkup, bring insurance card…" style={{width:"100%",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:T.text,outline:"none",fontFamily:"inherit",marginBottom:16,boxSizing:"border-box",minHeight:48}}/>
 
                   <div onClick={saveAppt} style={{background:"linear-gradient(135deg,#00BEFF,#0080CC)",borderRadius:16,padding:"16px",textAlign:"center",cursor:"pointer",fontSize:15,fontWeight:800,color:"#fff",minHeight:52}}>
-                    💾 Save Appointment
+                    {apptEditId ? "✏️ Update Appointment" : "💾 Save Appointment"}
                   </div>
                 </div>
               </div>
@@ -5161,13 +5174,16 @@ export default function PulseApp() {
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
                               <div style={{fontSize:14,fontWeight:800,color:T.text}}>{a.doctorName ? `Dr. ${a.doctorName}` : a.doctor}</div>
-                              <div onClick={()=>deleteAppt(a.id)} style={{fontSize:15,cursor:"pointer",color:T.textFaint,padding:"2px 4px"}}>❌</div>
+                              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                                <div onClick={()=>{ setApptEditId(a.id); setApptForm({ doctor:a.doctor||DOCTOR_TYPES[0], doctorName:a.doctorName||"" , address:a.address||"", member:a.member||"", date:a.date||"", time:a.time||"", notes:a.notes||"" }); setShowApptForm(true); }} style={{fontSize:14,cursor:"pointer",color:"#00BEFF",padding:"2px 4px"}} title="Edit">✏️</div>
+                                <div onClick={()=>deleteAppt(a.id)} style={{fontSize:15,cursor:"pointer",color:T.textFaint,padding:"2px 4px"}}>❌</div>
+                              </div>
                             </div>
                             <div style={{fontSize:12,color:T.textMuted,marginBottom:4,fontWeight:600}}>{a.doctor}</div>
                             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}>
                               <span style={{fontSize:10,fontWeight:700,color:"#00BEFF",background:"rgba(0,190,255,0.12)",padding:"2px 8px",borderRadius:20}}>👤 {a.member||"Family"}</span>
                               {a.date && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>📅 {new Date(a.date+"T12:00:00").toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"})}</span>}
-                              {a.time && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🕐 {a.time}</span>}
+                              {a.time && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🕐 {(()=>{ try { const [h,m]=a.time.split(":"); const hr=parseInt(h,10); return `${hr%12||12}:${m} ${hr<12?"AM":"PM"}`; } catch { return a.time; } })()}</span>}
                             </div>
                             {a.address && (
                               <a href={`https://maps.google.com/?q=${encodeURIComponent(a.address)}`} target="_blank" rel="noopener noreferrer" style={{textDecoration:"none"}}>
