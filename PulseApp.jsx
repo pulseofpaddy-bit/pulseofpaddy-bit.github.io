@@ -108,6 +108,7 @@ const PING_USERS    = `${PING_BASE}/users`;
 const PING_CHATS    = `${PING_BASE}/chats`;
 const PING_GROUPS   = `${PING_BASE}/groups`;
 const PING_PRESENCE = `${PING_BASE}/presence`;
+const FAMILY_BASE   = "https://pulse-family-default-rtdb.firebaseio.com/family";
 
 function pingAvatar(name="?", color="#FF3B5C") {
   return (
@@ -1216,32 +1217,31 @@ export default function PulseApp() {
   // Poll grocery every 30s when tab is active so family members' additions appear automatically
   useEffect(() => {
     if (mainTab !== "grocery") return;
-    const groceryPollId = setInterval(() => { loadGrocery(); }, 30000);
+    const groceryPollId = setInterval(() => { loadGrocery(); }, 10000);
     return () => clearInterval(groceryPollId);
   }, [mainTab, fwWorkspace, fwToken]);
 
   async function loadGrocery() {
     setGroceryLoading(true);
-    // Always load from localStorage first so UI shows data immediately
+    // Load from Firebase (real-time shared) — fall back to localStorage cache
     const cachedItems = localStorage.getItem("pulse_grocery_items");
     const cachedStores = localStorage.getItem("pulse_grocery_stores");
     if (cachedItems) { try { setGroceryItems(JSON.parse(cachedItems)); } catch(e) {} }
     if (cachedStores) { try { setGroceryStores(JSON.parse(cachedStores)); } catch(e) {} }
     try {
-      if (fwWorkspace?.fileIds?.grocery && fwToken) {
-        const all = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
-        if (all === null) {
-          // Token expired or network error — keep localStorage data, do not wipe
-          setGroceryLoading(false);
-          return;
-        }
-        const meta = all.find(i => i.__type === "stores_meta");
-        if (meta?.stores?.length) { setGroceryStores(meta.stores); localStorage.setItem("pulse_grocery_stores", JSON.stringify(meta.stores)); }
-        const items = all.filter(i => !i.__type).sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
-        // Only update if Drive has data, or if localStorage is also empty
-        if (items.length > 0 || !cachedItems) {
+      if (_fwKey) {
+        const res = await fetch(`${GROCERY_FB}.json`);
+        const data = await res.json();
+        if (data && typeof data === "object") {
+          const items = Object.entries(data)
+            .map(([id, val]) => ({ fbId: id, ...val }))
+            .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
           setGroceryItems(items);
           localStorage.setItem("pulse_grocery_items", JSON.stringify(items));
+        } else if (data === null) {
+          // Empty list on Firebase — clear local
+          setGroceryItems([]);
+          localStorage.setItem("pulse_grocery_items", "[]");
         }
       }
     } catch(e) { /* keep cached data on error */ }
@@ -1255,39 +1255,54 @@ export default function PulseApp() {
     const addedBy = fwUser?.name || "Family";
     const item = { id: "g_" + Date.now(), text, done: false, store: groceryStore === "all" ? "Walmart" : groceryStore, createdAt: Date.now(), addedBy, assignedTo: "" };
     setGroceryItems(prev => { const updated = [item, ...prev]; localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    if (fwWorkspace?.fileIds?.grocery && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
-      if (current === null) return; // token expired — localStorage already updated
-      const filtered = Array.isArray(current) ? current.filter(i => !i.__type) : [];
-      const meta = Array.isArray(current) ? current.filter(i => i.__type) : [];
-      await fwWriteFile(fwWorkspace.fileIds.grocery, [item, ...filtered, ...meta], fwToken);
+    if (_fwKey) {
+      try {
+        const res = await fetch(`${GROCERY_FB}.json`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item)
+        });
+        const data = await res.json();
+        if (data?.name) {
+          setGroceryItems(prev => {
+            const updated = prev.map(i => i.id === item.id ? { ...i, fbId: data.name } : i);
+            localStorage.setItem("pulse_grocery_items", JSON.stringify(updated));
+            return updated;
+          });
+        }
+      } catch(e) {}
     }
   }
 
   async function toggleGroceryItem(id, done) {
     setGroceryItems(prev => { const updated = prev.map(i => i.id === id ? { ...i, done: !done } : i); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    if (fwWorkspace?.fileIds?.grocery && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
-      if (current === null) return; // token expired — localStorage already updated
-      const updated = (Array.isArray(current) ? current : []).map(i => i.id === id ? { ...i, done: !done } : i);
-      await fwWriteFile(fwWorkspace.fileIds.grocery, updated, fwToken);
+    if (_fwKey) {
+      // Find the Firebase ID for this item
+      const item = groceryItems.find(i => i.id === id);
+      const fbId = item?.fbId;
+      if (fbId) {
+        try { await fetch(`${GROCERY_FB}/${fbId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ done: !done }) }); } catch(e) {}
+      }
     }
   }
 
   async function deleteGroceryItem(id) {
+    const item = groceryItems.find(i => i.id === id);
+    const fbId = item?.fbId;
     setGroceryItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    if (fwWorkspace?.fileIds?.grocery && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
-      if (current === null) return; // token expired — localStorage already updated
-      await fwWriteFile(fwWorkspace.fileIds.grocery, (Array.isArray(current) ? current : []).filter(i => i.id !== id), fwToken);
+    if (_fwKey && fbId) {
+      try { await fetch(`${GROCERY_FB}/${fbId}.json`, { method:"DELETE" }); } catch(e) {}
     }
   }
 
   async function clearDoneItems() {
+    const doneItems = groceryItems.filter(i => i.done);
     setGroceryItems(prev => { const updated = prev.filter(i => !i.done); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    if (fwWorkspace?.fileIds?.grocery && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.grocery, fwToken);
-      await fwWriteFile(fwWorkspace.fileIds.grocery, (Array.isArray(current) ? current : []).filter(i => i.done !== true), fwToken);
+    if (_fwKey) {
+      // Delete each done item from Firebase
+      await Promise.all(doneItems.filter(i => i.fbId).map(i =>
+        fetch(`${GROCERY_FB}/${i.fbId}.json`, { method:"DELETE" }).catch(()=>{})
+      ));
     }
   }
 
@@ -1878,6 +1893,11 @@ export default function PulseApp() {
   const [resvFilterType, setResvFilterType] = useState("all");
   const _resvUserKey = (fwUser?.email || "shared").replace(/[.#$[\]]/g, ",");
   const RESV_URL = `https://pulse-family-default-rtdb.firebaseio.com/reservations/${_resvUserKey}`;
+  // Shared family workspace Firebase key — same for all members (based on shared folder ID)
+  const _fwKey = (fwWorkspace?.folderId || fwUser?.email || "shared").replace(/[.#$\[\]]/g, ",");
+  const GROCERY_FB   = `${FAMILY_BASE}/${_fwKey}/grocery`;
+  const TODOS_FB     = `${FAMILY_BASE}/${_fwKey}/todos`;
+  const APPTS_FB     = `${FAMILY_BASE}/${_fwKey}/appointments`;
   const TODO_URL = "https://pulse-family-default-rtdb.firebaseio.com/todos";
   const RESV_TYPES = [
     { id:"✈️ Flight",     label:"Flight",      emoji:"✈️", color:"#6366F1" },
@@ -4823,9 +4843,6 @@ export default function PulseApp() {
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <div onClick={()=>loadGrocery()} style={{fontSize:11,fontWeight:700,color:"#3B82F6",cursor:"pointer",background:"rgba(59,130,246,0.1)",padding:"6px 12px",borderRadius:20,display:"flex",alignItems:"center",gap:4}}>
-                    {groceryLoading ? "⏳" : "🔄"} Sync
-                  </div>
                 {groceryItems.some(i=>i.done) && (
                   <div onClick={clearDoneItems} style={{fontSize:11,fontWeight:700,color:"#FF3B5C",cursor:"pointer",background:"rgba(255,59,92,0.1)",padding:"6px 12px",borderRadius:20}}>
                     Clear Done
