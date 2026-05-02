@@ -1214,14 +1214,20 @@ export default function PulseApp() {
   useEffect(() => {
     if (mainTab === "grocery") loadGrocery();
   }, [mainTab]);
-  // Poll grocery every 30s when tab is active so family members' additions appear automatically
+  // Poll grocery every 10s when tab is active so family members' additions appear automatically
   useEffect(() => {
     if (mainTab !== "grocery") return;
-    const groceryPollId = setInterval(() => { loadGrocery(); }, 10000);
+    const folderId = fwWorkspace?.folderId;
+    if (!folderId) return; // no workspace yet — don't poll
+    const key = folderId.replace(/[.#$[\]]/g, ",");
+    const fbUrl = `${FAMILY_BASE}/${key}/grocery`;
+    // Load immediately when tab opens
+    loadGrocery(fbUrl);
+    const groceryPollId = setInterval(() => { loadGrocery(fbUrl); }, 10000);
     return () => clearInterval(groceryPollId);
-  }, [mainTab, fwWorkspace, fwToken]);
+  }, [mainTab, fwWorkspace?.folderId]);
 
-  async function loadGrocery() {
+  async function loadGrocery(fbUrl) {
     setGroceryLoading(true);
     // Load from Firebase (real-time shared) — fall back to localStorage cache
     const cachedItems = localStorage.getItem("pulse_grocery_items");
@@ -1229,8 +1235,9 @@ export default function PulseApp() {
     if (cachedItems) { try { setGroceryItems(JSON.parse(cachedItems)); } catch(e) {} }
     if (cachedStores) { try { setGroceryStores(JSON.parse(cachedStores)); } catch(e) {} }
     try {
-      if (_fwKey) {
-        const res = await fetch(`${GROCERY_FB}.json`);
+      const url = fbUrl || GROCERY_FB;
+      if (url && !url.includes("undefined")) {
+        const res = await fetch(`${url}.json`);
         const data = await res.json();
         if (data && typeof data === "object") {
           const items = Object.entries(data)
@@ -1238,11 +1245,8 @@ export default function PulseApp() {
             .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
           setGroceryItems(items);
           localStorage.setItem("pulse_grocery_items", JSON.stringify(items));
-        } else if (data === null) {
-          // Empty list on Firebase — clear local
-          setGroceryItems([]);
-          localStorage.setItem("pulse_grocery_items", "[]");
         }
+        // If data === null, do NOT clear — keep existing items (could be a network blip)
       }
     } catch(e) { /* keep cached data on error */ }
     setGroceryLoading(false);
@@ -1253,11 +1257,14 @@ export default function PulseApp() {
     if (!text) return;
     setGroceryInput("");
     const addedBy = fwUser?.name || "Family";
-    const item = { id: "g_" + Date.now(), text, done: false, store: groceryStore === "all" ? "Walmart" : groceryStore, createdAt: Date.now(), addedBy, assignedTo: "" };
+    const item = { id: "g_" + Date.now(), text, done: false, store: groceryStore === "all" ? "" : groceryStore, createdAt: Date.now(), addedBy, assignedTo: "" };
     setGroceryItems(prev => { const updated = [item, ...prev]; localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    if (_fwKey) {
+    const folderId = fwWorkspace?.folderId;
+    if (folderId) {
+      const key = folderId.replace(/[.#$[\]]/g, ",");
+      const fbUrl = `${FAMILY_BASE}/${key}/grocery`;
       try {
-        const res = await fetch(`${GROCERY_FB}.json`, {
+        const res = await fetch(`${fbUrl}.json`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(item)
@@ -1274,34 +1281,38 @@ export default function PulseApp() {
     }
   }
 
-  async function toggleGroceryItem(id, done) {
+   async function toggleGroceryItem(id, done) {
     setGroceryItems(prev => { const updated = prev.map(i => i.id === id ? { ...i, done: !done } : i); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    if (_fwKey) {
-      // Find the Firebase ID for this item
+    const folderId = fwWorkspace?.folderId;
+    if (folderId) {
+      const key = folderId.replace(/[.#$[\]]/g, ",");
+      const fbBase = `${FAMILY_BASE}/${key}/grocery`;
       const item = groceryItems.find(i => i.id === id);
       const fbId = item?.fbId;
       if (fbId) {
-        try { await fetch(`${GROCERY_FB}/${fbId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ done: !done }) }); } catch(e) {}
+        try { await fetch(`${fbBase}/${fbId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ done: !done }) }); } catch(e) {}
       }
     }
   }
-
   async function deleteGroceryItem(id) {
     const item = groceryItems.find(i => i.id === id);
     const fbId = item?.fbId;
     setGroceryItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    if (_fwKey && fbId) {
-      try { await fetch(`${GROCERY_FB}/${fbId}.json`, { method:"DELETE" }); } catch(e) {}
+    const folderId = fwWorkspace?.folderId;
+    if (folderId && fbId) {
+      const key = folderId.replace(/[.#$[\]]/g, ",");
+      try { await fetch(`${FAMILY_BASE}/${key}/grocery/${fbId}.json`, { method:"DELETE" }); } catch(e) {}
     }
   }
 
   async function clearDoneItems() {
     const doneItems = groceryItems.filter(i => i.done);
     setGroceryItems(prev => { const updated = prev.filter(i => !i.done); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    if (_fwKey) {
-      // Delete each done item from Firebase
+    const folderId = fwWorkspace?.folderId;
+    if (folderId) {
+      const key = folderId.replace(/[.#$[\]]/g, ",");
       await Promise.all(doneItems.filter(i => i.fbId).map(i =>
-        fetch(`${GROCERY_FB}/${i.fbId}.json`, { method:"DELETE" }).catch(()=>{})
+        fetch(`${FAMILY_BASE}/${key}/grocery/${i.fbId}.json`, { method:"DELETE" }).catch(()=>{})
       ));
     }
   }
