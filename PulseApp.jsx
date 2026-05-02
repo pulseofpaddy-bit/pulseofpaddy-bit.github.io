@@ -1237,12 +1237,13 @@ export default function PulseApp() {
         if (data && typeof data === "object") {
           const fbItems = Object.entries(data)
             .map(([id, val]) => ({ fbId: id, ...val }))
+            .filter(i => i.text && i.text.trim()) // skip empty/nameless items from Firebase
             .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
           // Merge: keep any local items that haven't been saved to Firebase yet (no fbId)
           // but skip the merge if a write is currently in-flight (to avoid race condition)
           if (!groceryWritePending.current) {
             setGroceryItems(prev => {
-              const localOnly = prev.filter(i => !i.fbId); // items added locally but not yet in Firebase
+              const localOnly = prev.filter(i => !i.fbId && i.text && i.text.trim()); // local items with text, not yet in Firebase
               const merged = [...localOnly, ...fbItems];
               // Deduplicate by id (local item wins if same id exists)
               const seen = new Set();
@@ -5028,12 +5029,7 @@ export default function PulseApp() {
                       </>
                     )}
 
-                    {/* Firebase note */}
-                    <div style={{textAlign:"center",marginTop:20,padding:"12px",background:isDark?"rgba(255,184,0,0.07)":"rgba(255,184,0,0.08)",borderRadius:16,border:`1px solid rgba(255,184,0,0.2)`}}>
-                      <div style={{fontSize:11,color:T.textFaint,lineHeight:1.6}}>
-                        ☁️ <strong style={{color:"#FFB800"}}>Real-time sync</strong> — changes appear instantly on all family members' phones
-                      </div>
-                    </div>
+
                   </>
                 );
               })()}
