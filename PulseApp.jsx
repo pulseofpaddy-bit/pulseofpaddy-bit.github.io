@@ -1211,18 +1211,14 @@ export default function PulseApp() {
     }
   }
 
-  useEffect(() => {
-    if (mainTab === "grocery") loadGrocery();
-  }, [mainTab]);
-  // Poll grocery every 10s when tab is active so family members' additions appear automatically
+  // Load + poll grocery every 10s when tab is active — uses folderId directly so URL is always correct
   useEffect(() => {
     if (mainTab !== "grocery") return;
     const folderId = fwWorkspace?.folderId;
-    if (!folderId) return; // no workspace yet — don't poll
+    if (!folderId) return; // no workspace yet — wait for workspace to load
     const key = folderId.replace(/[.#$[\]]/g, ",");
     const fbUrl = `${FAMILY_BASE}/${key}/grocery`;
-    // Load immediately when tab opens
-    loadGrocery(fbUrl);
+    loadGrocery(fbUrl); // immediate load
     const groceryPollId = setInterval(() => { loadGrocery(fbUrl); }, 10000);
     return () => clearInterval(groceryPollId);
   }, [mainTab, fwWorkspace?.folderId]);
@@ -4982,7 +4978,7 @@ export default function PulseApp() {
                           }}/>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontSize:14,fontWeight:600,color:T.text}}>{item.text}</div>
-                            <div style={{fontSize:10,color:T.textFaint,marginTop:2}}>{itemStore?.emoji} {item.store || "Walmart"}</div>
+                            <div style={{fontSize:10,color:T.textFaint,marginTop:2}}>{itemStore?.emoji} {item.store || ""}</div>
                           </div>
                           <div onClick={()=>deleteGroceryItem(item.id)} style={{fontSize:16,cursor:"pointer",color:T.textFaint,padding:"4px",flexShrink:0}}>❌</div>
                         </div>
@@ -5010,7 +5006,7 @@ export default function PulseApp() {
                             }}>✔</div>
                             <div style={{flex:1,minWidth:0}}>
                               <div style={{fontSize:14,fontWeight:500,color:T.textMuted,textDecoration:"line-through"}}>{item.text}</div>
-                              <div style={{fontSize:10,color:T.textFaint,marginTop:2}}>{itemStore?.emoji} {item.store || "Walmart"}</div>
+                              <div style={{fontSize:10,color:T.textFaint,marginTop:2}}>{itemStore?.emoji} {item.store || ""}</div>
                             </div>
                             <div onClick={()=>deleteGroceryItem(item.id)} style={{fontSize:16,cursor:"pointer",color:T.textFaint,padding:"4px",flexShrink:0}}>❌</div>
                           </div>
