@@ -3075,24 +3075,24 @@ export default function PulseApp() {
     return { folderId, fileIds, isOwner };
   }
 
-  // Extract and store the shared workspace key from Members.json
-  // The head writes their folderId into Members.json as __workspace_key
-  // All members read this key and use it as the Firebase path
+  // Derive the shared Firebase key from the head's email in Members.json.
+  // This works even when family members have their own separate workspace folders,
+  // because the head's email is the same value in every Members.json.
   async function fwSyncSharedKey(workspace, token, role) {
     if (!workspace?.fileIds?.members || !token) return;
     try {
       const members = await fwReadFile(workspace.fileIds.members, token);
       if (!Array.isArray(members)) return;
-      const meta = members.find(m => m.__workspace_key);
-      if (meta?.__workspace_key) {
-        // Use the key stored by the head
-        setFwSharedFolderKey(meta.__workspace_key);
-        localStorage.setItem("pulse_fw_shared_key", meta.__workspace_key);
-      } else if (role === "head" || workspace.isOwner) {
-        // Head: write their folderId as the shared key
-        const key = workspace.folderId;
-        const withMeta = members.filter(m => !m.__workspace_key);
-        await fwWriteFile(workspace.fileIds.members, [...withMeta, { __workspace_key: key }], token);
+      // Find the head member entry
+      const headMember = members.find(m => m.role === "head" && m.email);
+      if (headMember?.email) {
+        // Use head's email (sanitized) as the shared Firebase key
+        const key = headMember.email.replace(/[.#$[\]@]/g, ",");
+        setFwSharedFolderKey(key);
+        localStorage.setItem("pulse_fw_shared_key", key);
+      } else if (role === "head" && fwUser?.email) {
+        // We ARE the head — use our own email
+        const key = fwUser.email.replace(/[.#$[\]@]/g, ",");
         setFwSharedFolderKey(key);
         localStorage.setItem("pulse_fw_shared_key", key);
       }
@@ -3232,7 +3232,7 @@ export default function PulseApp() {
     if (fwWorkspace?.fileIds?.members && fwToken) {
       fwReadFile(fwWorkspace.fileIds.members, fwToken).then(m => {
         if (m === null) return; // expired token — keep existing state/cache
-        const list = Array.isArray(m) ? m.filter(x => !x.__workspace_key) : [];
+        const list = Array.isArray(m) ? m.filter(x => x.email && !x.__workspace_key) : [];
         setFwMembers(list);
         if (list.length > 0) localStorage.setItem("pulse_fw_members_cache", JSON.stringify(list));
         // Sync shared Firebase key on every startup
@@ -3506,6 +3506,8 @@ export default function PulseApp() {
         setFwMembers(updated);
         localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
       }
+      // Sync the shared Firebase key so all family members use the same path
+      await fwSyncSharedKey(ws, fwToken, role);
       if (role === "head") {
         setOnboardingStep("add_members");
       } else {
