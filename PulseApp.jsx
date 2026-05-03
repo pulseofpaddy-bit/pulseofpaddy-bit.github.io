@@ -3474,8 +3474,9 @@ export default function PulseApp() {
         // Reload from Drive to confirm write succeeded and refresh member list
         fwReadFile(fwWorkspace.fileIds.members, fwToken).then(m => {
           if (Array.isArray(m) && m.length > 0) {
-            setFwMembers(m);
-            localStorage.setItem("pulse_fw_members_cache", JSON.stringify(m));
+            const filtered = m.filter(x => x.email && !x.__workspace_key);
+            setFwMembers(filtered);
+            localStorage.setItem("pulse_fw_members_cache", JSON.stringify(filtered));
           }
         }).catch(() => {});
       fwSendInviteEmail(email, name, fwToken).catch(() => {});
@@ -7788,13 +7789,13 @@ export default function PulseApp() {
                   No members yet. {fwRole === "head" ? "Invite family members to get started." : "Ask the Family Head to invite you."}
                 </div>
               )}
-              {fwMembers.map((m,i) => (
+              {fwMembers.filter(m => m.email).map((m,i) => (
                 <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:T.bgCard,borderRadius:14,marginBottom:8,border:`1px solid ${T.border}`}}>
                   <div style={{width:38,height:38,borderRadius:19,background:`hsl(${(i*67)%360},60%,55%)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:800,color:"#fff",flexShrink:0}}>
                     {(m.name||m.email||"?")[0].toUpperCase()}
                   </div>
                   <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:700,color:T.text}}>{m.name || m.email.split("@")[0]}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:T.text}}>{m.name || (m.email||"?").split("@")[0]}</div>
                     <div style={{fontSize:10,color:T.textFaint}}>{m.email}</div>
                   </div>
                   <div style={{fontSize:9,fontWeight:700,color:m.role==="head"?"#22C55E":"#A855F7",background:m.role==="head"?"rgba(34,197,94,0.12)":"rgba(168,85,247,0.12)",padding:"3px 8px",borderRadius:10}}>
