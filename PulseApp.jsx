@@ -108,7 +108,8 @@ const PING_USERS    = `${PING_BASE}/users`;
 const PING_CHATS    = `${PING_BASE}/chats`;
 const PING_GROUPS   = `${PING_BASE}/groups`;
 const PING_PRESENCE = `${PING_BASE}/presence`;
-const FAMILY_BASE   = "https://pulse-family-default-rtdb.firebaseio.com/family";
+const FAMILY_BASE          = "https://pulse-family-default-rtdb.firebaseio.com/family";
+const FAMILY_MEMBER_LOOKUP = "https://pulse-family-default-rtdb.firebaseio.com/member_lookup"; // maps member email -> head email for shared key lookup
 
 function pingAvatar(name="?", color="#FF3B5C") {
   return (
@@ -3075,26 +3076,45 @@ export default function PulseApp() {
     return { folderId, fileIds, isOwner };
   }
 
-  // Derive the shared Firebase key from the head's email in Members.json.
-  // This works even when family members have their own separate workspace folders,
-  // because the head's email is the same value in every Members.json.
+  // Derive the shared Firebase key so ALL family members write to the SAME grocery path.
+  // Strategy:
+  //   1. If we ARE the head — use our own email as the key
+  //   2. If Members.json has a head entry — use that head's email
+  //   3. Otherwise — look up Firebase member_lookup with our own email to find the head
   async function fwSyncSharedKey(workspace, token, role) {
-    if (!workspace?.fileIds?.members || !token) return;
     try {
-      const members = await fwReadFile(workspace.fileIds.members, token);
-      if (!Array.isArray(members)) return;
-      // Find the head member entry
-      const headMember = members.find(m => m.role === "head" && m.email);
-      if (headMember?.email) {
-        // Use head's email (sanitized) as the shared Firebase key
-        const key = headMember.email.replace(/[.#$[\]@]/g, ",");
-        setFwSharedFolderKey(key);
-        localStorage.setItem("pulse_fw_shared_key", key);
-      } else if (role === "head" && fwUser?.email) {
-        // We ARE the head — use our own email
+      // Case 1: We are the head
+      if ((role === "head" || fwRole === "head") && fwUser?.email) {
         const key = fwUser.email.replace(/[.#$[\]@]/g, ",");
         setFwSharedFolderKey(key);
         localStorage.setItem("pulse_fw_shared_key", key);
+        return;
+      }
+      // Case 2: Members.json has a head entry
+      if (workspace?.fileIds?.members && token) {
+        const members = await fwReadFile(workspace.fileIds.members, token);
+        if (Array.isArray(members)) {
+          const headMember = members.find(m => m.role === "head" && m.email);
+          if (headMember?.email) {
+            const key = headMember.email.replace(/[.#$[\]@]/g, ",");
+            setFwSharedFolderKey(key);
+            localStorage.setItem("pulse_fw_shared_key", key);
+            return;
+          }
+        }
+      }
+      // Case 3: Look up Firebase member_lookup with our own email
+      if (fwUser?.email) {
+        const myKey = fwUser.email.replace(/[.#$[\]@]/g, ",");
+        const res = await fetch(`${FAMILY_MEMBER_LOOKUP}/${myKey}.json`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.headKey) {
+            setFwSharedFolderKey(data.headKey);
+            localStorage.setItem("pulse_fw_shared_key", data.headKey);
+            return;
+          }
+        }
       }
     } catch(e) {}
   }
@@ -3439,6 +3459,16 @@ export default function PulseApp() {
         setFwMembers(updated);
         // Also save to localStorage as backup
         localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
+      }
+      // Write head email to Firebase member_lookup so Rani's phone can find the shared key
+      if (fwUser?.email) {
+        const memberKey = email.replace(/[.#$[\]@]/g, ",");
+        const headKey = fwUser.email.replace(/[.#$[\]@]/g, ",");
+        fetch(`${FAMILY_MEMBER_LOOKUP}/${memberKey}.json`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ headEmail: fwUser.email, headKey, updatedAt: Date.now() })
+        }).catch(() => {});
       }
       // Send invite email — completely independent, never blocks member add
         // Reload from Drive to confirm write succeeded and refresh member list
