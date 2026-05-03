@@ -569,6 +569,8 @@ export default function PulseApp() {
   const [fwRole, setFwRole]               = useState(() => localStorage.getItem("pulse_fw_role")||null); // "head" | "member"
   const [fwWorkspace, setFwWorkspace]     = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_fw_workspace")||"null"); } catch { return null; } }); // { folderId, fileIds:{grocery,todos,appointments,members} }
   const [fwMembers, setFwMembers]         = useState(() => { try { const c = localStorage.getItem('pulse_fw_members_cache'); return c ? JSON.parse(c) : []; } catch { return []; } });  // [{ name, email, role, joinedAt }]
+  // Shared Firebase key — always the HEAD's folderId, stored in Members.json so all family members use the same path
+  const [fwSharedFolderKey, setFwSharedFolderKey] = useState(() => localStorage.getItem("pulse_fw_shared_key") || null);
   const [fwScreen, setFwScreen]           = useState("home"); // "home" | "setup" | "invite"
   const [fwLoading, setFwLoading]         = useState(false);
   const [fwError, setFwError]             = useState("");
@@ -1212,17 +1214,18 @@ export default function PulseApp() {
     }
   }
 
-  // Load + poll grocery every 10s when tab is active — uses folderId directly so URL is always correct
+  // Load + poll grocery every 10s when tab is active
+  // Uses fwSharedFolderKey (the head's folderId stored in Members.json) so ALL family members write to the SAME Firebase path
   useEffect(() => {
     if (mainTab !== "grocery") return;
-    const folderId = fwWorkspace?.folderId;
-    if (!folderId) return; // no workspace yet — wait for workspace to load
-    const key = folderId.replace(/[.#$[\]]/g, ",");
+    const sharedKey = fwSharedFolderKey || fwWorkspace?.folderId;
+    if (!sharedKey) return; // no workspace yet — wait
+    const key = sharedKey.replace(/[.#$[\]]/g, ",");
     const fbUrl = `${FAMILY_BASE}/${key}/grocery`;
     loadGrocery(fbUrl); // immediate load
     const groceryPollId = setInterval(() => { loadGrocery(fbUrl); }, 10000);
     return () => clearInterval(groceryPollId);
-  }, [mainTab, fwWorkspace?.folderId]);
+  }, [mainTab, fwSharedFolderKey, fwWorkspace?.folderId]);
 
   async function loadGrocery(fbUrl) {
     setGroceryLoading(true);
@@ -1267,7 +1270,7 @@ export default function PulseApp() {
     const addedBy = fwUser?.name || "Family";
     const item = { id: "g_" + Date.now(), text, done: false, store: groceryStore === "all" ? "" : groceryStore, createdAt: Date.now(), addedBy, assignedTo: "" };
     setGroceryItems(prev => { const updated = [item, ...prev]; localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    const folderId = fwWorkspace?.folderId;
+    const folderId = fwSharedFolderKey || fwWorkspace?.folderId;
     if (folderId) {
       const key = folderId.replace(/[.#$[\]]/g, ",");
       const fbUrl = `${FAMILY_BASE}/${key}/grocery`;
@@ -1293,7 +1296,7 @@ export default function PulseApp() {
 
    async function toggleGroceryItem(id, done) {
     setGroceryItems(prev => { const updated = prev.map(i => i.id === id ? { ...i, done: !done } : i); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    const folderId = fwWorkspace?.folderId;
+    const folderId = fwSharedFolderKey || fwWorkspace?.folderId;
     if (folderId) {
       const key = folderId.replace(/[.#$[\]]/g, ",");
       const fbBase = `${FAMILY_BASE}/${key}/grocery`;
@@ -1308,7 +1311,7 @@ export default function PulseApp() {
     const item = groceryItems.find(i => i.id === id);
     const fbId = item?.fbId;
     setGroceryItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    const folderId = fwWorkspace?.folderId;
+    const folderId = fwSharedFolderKey || fwWorkspace?.folderId;
     if (folderId && fbId) {
       const key = folderId.replace(/[.#$[\]]/g, ",");
       try { await fetch(`${FAMILY_BASE}/${key}/grocery/${fbId}.json`, { method:"DELETE" }); } catch(e) {}
@@ -1318,7 +1321,7 @@ export default function PulseApp() {
   async function clearDoneItems() {
     const doneItems = groceryItems.filter(i => i.done);
     setGroceryItems(prev => { const updated = prev.filter(i => !i.done); localStorage.setItem("pulse_grocery_items", JSON.stringify(updated)); return updated; });
-    const folderId = fwWorkspace?.folderId;
+    const folderId = fwSharedFolderKey || fwWorkspace?.folderId;
     if (folderId) {
       const key = folderId.replace(/[.#$[\]]/g, ",");
       await Promise.all(doneItems.filter(i => i.fbId).map(i =>
@@ -3072,6 +3075,30 @@ export default function PulseApp() {
     return { folderId, fileIds, isOwner };
   }
 
+  // Extract and store the shared workspace key from Members.json
+  // The head writes their folderId into Members.json as __workspace_key
+  // All members read this key and use it as the Firebase path
+  async function fwSyncSharedKey(workspace, token, role) {
+    if (!workspace?.fileIds?.members || !token) return;
+    try {
+      const members = await fwReadFile(workspace.fileIds.members, token);
+      if (!Array.isArray(members)) return;
+      const meta = members.find(m => m.__workspace_key);
+      if (meta?.__workspace_key) {
+        // Use the key stored by the head
+        setFwSharedFolderKey(meta.__workspace_key);
+        localStorage.setItem("pulse_fw_shared_key", meta.__workspace_key);
+      } else if (role === "head" || workspace.isOwner) {
+        // Head: write their folderId as the shared key
+        const key = workspace.folderId;
+        const withMeta = members.filter(m => !m.__workspace_key);
+        await fwWriteFile(workspace.fileIds.members, [...withMeta, { __workspace_key: key }], token);
+        setFwSharedFolderKey(key);
+        localStorage.setItem("pulse_fw_shared_key", key);
+      }
+    } catch(e) {}
+  }
+
   // Read a JSON file from Drive
   async function fwReadFile(fileId, token) {
     try {
@@ -3148,7 +3175,10 @@ export default function PulseApp() {
             setFwWorkspace(ws);
             localStorage.setItem("pulse_fw_workspace", JSON.stringify(ws));
             const members = await fwReadFile(ws.fileIds.members, token);
-            const existingMember = members.find(m => m.email === user.email);
+            const existingMember = Array.isArray(members) ? members.find(m => m.email === user.email) : null;
+            // Sync the shared Firebase key so all members use the head's folderId
+            const role = existingMember?.role || (ws.isOwner ? "head" : "member");
+            await fwSyncSharedKey(ws, token, role);
             if (existingMember && existingMember.role) {
               // Already registered — check if gender is set
               const role = existingMember.role;
@@ -3202,9 +3232,11 @@ export default function PulseApp() {
     if (fwWorkspace?.fileIds?.members && fwToken) {
       fwReadFile(fwWorkspace.fileIds.members, fwToken).then(m => {
         if (m === null) return; // expired token — keep existing state/cache
-        const list = Array.isArray(m) ? m : [];
+        const list = Array.isArray(m) ? m.filter(x => !x.__workspace_key) : [];
         setFwMembers(list);
         if (list.length > 0) localStorage.setItem("pulse_fw_members_cache", JSON.stringify(list));
+        // Sync shared Firebase key on every startup
+        fwSyncSharedKey(fwWorkspace, fwToken, fwRole);
       });
     }
   }, [fwWorkspace, fwToken]);
@@ -3440,8 +3472,8 @@ export default function PulseApp() {
 
   // Sign out of Family Workspace
   function fwSignOut() {
-    ["pulse_fw_user","pulse_fw_token","pulse_fw_role","pulse_fw_workspace"].forEach(k => localStorage.removeItem(k));
-    setFwUser(null); setFwToken(null); setFwRole(null); setFwWorkspace(null); setFwMembers([]);
+    ["pulse_fw_user","pulse_fw_token","pulse_fw_role","pulse_fw_workspace","pulse_fw_shared_key"].forEach(k => localStorage.removeItem(k));
+    setFwUser(null); setFwToken(null); setFwRole(null); setFwWorkspace(null); setFwMembers([]); setFwSharedFolderKey(null);
     setOnboardingStep("splash");
   }
 
