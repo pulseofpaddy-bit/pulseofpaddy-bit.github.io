@@ -1569,9 +1569,15 @@ export default function PulseApp() {
         if (!calRes.ok) {
           const errText = await calRes.text().catch(() => calRes.status);
           console.warn("Calendar API error:", calRes.status, errText);
-          setApptSyncMsg(`⚠️ Calendar access denied (${calRes.status}) — please sign out and sign back in`);
+          setApptSyncMsg(`⚠️ Calendar: HTTP ${calRes.status} — sign out & sign in again`);
+          setApptSyncing(false);
+          setTimeout(() => setApptSyncMsg(""), 8000);
+          return;
         } else {
           const calData = await calRes.json();
+          const totalEvents = (calData.items || []).length;
+          console.log(`Calendar: found ${totalEvents} events`, (calData.items||[]).map(e=>e.summary));
+          setApptSyncMsg(`📅 Found ${totalEvents} calendar events, checking…`);
           const seenCalIds = new Set(apptItems.filter(a => a.calendarId).map(a => a.calendarId));
           for (const event of (calData.items || [])) {
             try {
@@ -1582,7 +1588,7 @@ export default function PulseApp() {
               // Import if it matches medical keywords OR has "appointment" in the title
               let doctorType = apptClassifyDoctor(title, desc);
               if (!doctorType && /appointment/i.test(title)) doctorType = "👨‍⚕️ Primary Care";
-              if (!doctorType) continue;
+              if (!doctorType) { console.log(`Skipped: "${title}" — no medical match`); continue; }
               const startRaw = event.start?.dateTime || event.start?.date || "";
               const startDate = new Date(startRaw);
               if (isNaN(startDate)) continue;
