@@ -98,7 +98,7 @@ const OTT_CATEGORIES = [
 
 // ─── FAMILY WORKSPACE CONFIG ────────────────────────────────────────
 const FAMILY_CLIENT_ID   = "360320151404-1miklman0sr6gends9nuuuggecauneea.apps.googleusercontent.com";
-const FAMILY_SCOPES      = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send";
+const FAMILY_SCOPES      = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.readonly";
 const WORKSPACE_FOLDER   = "PulseApp_Workspace";
 const WORKSPACE_FILES    = { grocery:"Grocery.json", todos:"Todo.json", appointments:"Appointments.json", members:"Members.json", periods:"Periods.json", pregnancy:"Pregnancy.json", contacts:"Contacts.json", payReminders:"PayReminders.json", moneyLent:"MoneyLent.json" };
 
@@ -1426,7 +1426,7 @@ export default function PulseApp() {
     const s = (subject + " " + body).toLowerCase();
     if (/pediatric|paediatr|well.?child|child.*check|immunization|vaccination.*child/.test(s)) return "👶 Pediatrician";
     if (/gynecolog|ob.?gyn|prenatal|pap smear|mammogram|women.?s health|obstetric/.test(s)) return "👩‍⚕️ Gynecologist";
-    if (/dental|dentist|orthodont|tooth|teeth|oral|root canal|crown|filling|cleaning/.test(s)) return "🦷 Dentist";
+    if (/dental|dentist|orthodont|tooth|teeth|oral|root canal|crown|filling|cleaning|waffles.*tooth|tooth.*waffles/.test(s)) return "🦷 Dentist";
     if (/eye|vision|ophthal|optometr|retina|glasses|contact lens|lasik/.test(s)) return "👁️ Eye Doctor";
     if (/pharmacy|prescription|refill|medication|rx|drug/.test(s)) return "💊 Pharmacy";
     if (/hospital|emergency|urgent care|er visit|admission|discharge|surgery|operation/.test(s)) return "🏥 Hospital";
@@ -1556,6 +1556,61 @@ export default function PulseApp() {
           } catch(e) { /* skip individual message errors */ }
         }
       }
+
+      // ─── GOOGLE CALENDAR SYNC ────────────────────────────────────────
+      setApptSyncMsg("📅 Scanning Google Calendar…");
+      try {
+        const now = new Date().toISOString();
+        const sixMonths = new Date(Date.now() + 180*24*60*60*1000).toISOString();
+        const calRes = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=50&orderBy=startTime&singleEvents=true&timeMin=${encodeURIComponent(now)}&timeMax=${encodeURIComponent(sixMonths)}`,
+          { headers: { Authorization: `Bearer ${fwToken}` } }
+        );
+        if (calRes.ok) {
+          const calData = await calRes.json();
+          const seenCalIds = new Set(apptItems.filter(a => a.calendarId).map(a => a.calendarId));
+          for (const event of (calData.items || [])) {
+            try {
+              const calId = `appt_cal_${event.id}`;
+              if (seenCalIds.has(calId)) continue;
+              const title = event.summary || "";
+              const desc = event.description || "";
+              const doctorType = apptClassifyDoctor(title, desc);
+              if (!doctorType) continue; // not a medical event
+              const startRaw = event.start?.dateTime || event.start?.date || "";
+              const startDate = new Date(startRaw);
+              if (isNaN(startDate)) continue;
+              const dateStr = startDate.toISOString().split("T")[0];
+              const timeStr = event.start?.dateTime
+                ? `${String(startDate.getHours()).padStart(2,"0")}:${String(startDate.getMinutes()).padStart(2,"0")}`
+                : "";
+              const location = event.location || "";
+              const calItem = {
+                id: "a_" + Date.now() + "_" + Math.random().toString(36).slice(2,6),
+                doctor: doctorType,
+                doctorName: "",
+                address: location.slice(0, 80),
+                member: familyMembers[0] || "Me",
+                date: dateStr,
+                time: timeStr,
+                notes: title.slice(0, 120),
+                done: false,
+                createdAt: Date.now(),
+                addedBy: "Calendar Sync",
+                calendarId: calId,
+                source: "calendar",
+              };
+              setApptItems(prev => {
+                const updated = [...prev, calItem].sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time));
+                localStorage.setItem("pulse_appointments", JSON.stringify(updated));
+                return updated;
+              });
+              seenCalIds.add(calId);
+              imported++;
+            } catch(e) { /* skip individual event errors */ }
+          }
+        }
+      } catch(e) { /* Calendar sync failed silently */ }
 
       // Sync to Drive
       if (imported > 0 && fwWorkspace?.fileIds?.appointments && fwToken) {
