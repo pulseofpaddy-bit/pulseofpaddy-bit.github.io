@@ -3268,7 +3268,7 @@ export default function PulseApp() {
               // Update their profile info
               const updated = members.map(m => m.email === user.email ? { ...m, name: user.name, photo: user.photo } : m);
               await fwWriteFile(ws.fileIds.members, updated, token);
-              setFwMembers(updated);
+              setFwMembers(updated.filter(x => x.email));
               if (!existingMember.gender) {
                 // No gender set — ask for it
                 setOnboardingStep("gender");
@@ -3282,7 +3282,7 @@ export default function PulseApp() {
                 // Returning user
                 setFwRole("head");
                 localStorage.setItem("pulse_fw_role", "head");
-                setFwMembers(members);
+                setFwMembers(Array.isArray(members) ? members.filter(x => x.email) : []);
                 if (!alreadyIn.gender) {
                   setOnboardingStep("gender");
                 } else {
@@ -3290,12 +3290,12 @@ export default function PulseApp() {
                 }
               } else {
                 // New user who owns workspace — show role selection
-                setFwMembers(members);
+                setFwMembers(Array.isArray(members) ? members.filter(x => x.email) : []);
                 setOnboardingStep("role");
               }
             } else {
               // New user, not owner, not pre-registered — show role selection
-              setFwMembers(members);
+              setFwMembers(Array.isArray(members) ? members.filter(x => x.email) : []);
               setOnboardingStep("role");
             }
           } catch(e) {
