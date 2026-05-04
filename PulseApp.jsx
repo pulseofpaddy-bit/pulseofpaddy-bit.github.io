@@ -3364,6 +3364,17 @@ export default function PulseApp() {
         }
       });
     }
+    // Load Todo items from Drive on startup so they survive hard refreshes
+    if (fwWorkspace?.fileIds?.todos && fwToken) {
+      fwReadFile(fwWorkspace.fileIds.todos, fwToken).then(data => {
+        if (data === null) return; // token expired — keep localStorage cache
+        if (Array.isArray(data) && data.length > 0) {
+          const sorted = data.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+          setTodoItems(sorted);
+          localStorage.setItem("pulse_todo_items", JSON.stringify(sorted));
+        }
+      });
+    }
     // Load Finance data from Drive
     if (fwWorkspace?.fileIds?.payReminders && fwToken) {
       fwReadFile(fwWorkspace.fileIds.payReminders, fwToken).then(data => {
