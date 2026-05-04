@@ -3418,14 +3418,30 @@ export default function PulseApp() {
         if (!fileId) return;
         fwReadFile(fileId, fwToken).then(data => {
           if (Array.isArray(data) && data.length > 0) {
-            if (data[0]?.encrypted) {
-              localStorage.setItem(SF_DATA_KEY, data[0].encrypted);
+            const entry = data[0];
+            // Restore encrypted data to localStorage
+            if (entry?.encrypted) {
+              localStorage.setItem(SF_DATA_KEY, entry.encrypted);
             }
-            if (data[0]?.pin) {
-              localStorage.setItem(SF_PIN_KEY, data[0].pin);
+            // Restore PIN to localStorage — critical: without this, vault shows "Set PIN" after hard refresh
+            if (entry?.pin) {
+              localStorage.setItem(SF_PIN_KEY, entry.pin);
+            }
+            // If vault was already unlocked in this session, reload items from restored data
+            if (entry?.encrypted && entry?.pin) {
+              try {
+                const realPin = sfDecrypt(entry.pin, "PulseSecure2026");
+                if (realPin) {
+                  const decrypted = sfDecrypt(entry.encrypted, realPin);
+                  if (decrypted) {
+                    const items = JSON.parse(decrypted);
+                    if (Array.isArray(items)) setSfItems(items);
+                  }
+                }
+              } catch(e) { /* keep existing items */ }
             }
           }
-        });
+        }).catch(()=>{});
       }).catch(()=>{});
     }
   }, [fwWorkspace, fwToken]);
