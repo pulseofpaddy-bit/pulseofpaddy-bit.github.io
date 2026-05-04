@@ -4002,7 +4002,7 @@ export default function PulseApp() {
     setSearchedCity(city);
     setUserCity(city);
     // Use Overpass area-based geocoding — no separate geocoder needed, fully CORS-safe
-    const cuisineMap = { american:"american", indian:"indian", italian:"italian", chinese:"chinese", mexican:"mexican", japanese:"japanese" };
+    const cuisineMap = { american:"american", indian:"indian", italian:"italian", chinese:"chinese", mexican:"mexican", japanese:"japanese", thai:"thai" };
     const tag = cuisineMap[cuisine] || cuisine;
     // Extract just the city name (strip state/country suffixes for Overpass area matching)
     const cityName = city.split(",")[0].trim().replace(/["\\\n\r]/g, '');
@@ -4060,6 +4060,7 @@ export default function PulseApp() {
       chinese:  "chinese",
       mexican:  "mexican",
       japanese: "japanese",
+      thai:     "thai",
     };
     const tag = cuisineMap[cuisine] || cuisine;
 
@@ -4893,7 +4894,8 @@ export default function PulseApp() {
                   {id:"italian",label:"Italian",flag:"IT"},
                   {id:"chinese",label:"Chinese",flag:"CN"},
                   {id:"mexican",label:"Mexican",flag:"MX"},
-                  {id:"japanese",label:"Japanese",flag:"JP"}
+                  {id:"japanese",label:"Japanese",flag:"JP"},
+                  {id:"thai",label:"Thai",flag:"TH"}
                 ].map(cu=>{
                   const active = cu.id === restaurantCuisine;
                   return (
