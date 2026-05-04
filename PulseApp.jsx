@@ -3230,7 +3230,8 @@ export default function PulseApp() {
       redirect_uri: window.location.origin + window.location.pathname,
       response_type: "token",
       scope: FAMILY_SCOPES,
-      prompt: "select_account",
+      prompt: "consent",
+      include_granted_scopes: "true",
     });
     sessionStorage.setItem("pulse_fw_oauth", "1");
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
