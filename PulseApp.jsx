@@ -1566,7 +1566,11 @@ export default function PulseApp() {
           `https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=50&orderBy=startTime&singleEvents=true&timeMin=${encodeURIComponent(now)}&timeMax=${encodeURIComponent(sixMonths)}`,
           { headers: { Authorization: `Bearer ${fwToken}` } }
         );
-        if (calRes.ok) {
+        if (!calRes.ok) {
+          const errText = await calRes.text().catch(() => calRes.status);
+          console.warn("Calendar API error:", calRes.status, errText);
+          setApptSyncMsg(`⚠️ Calendar access denied (${calRes.status}) — please sign out and sign back in`);
+        } else {
           const calData = await calRes.json();
           const seenCalIds = new Set(apptItems.filter(a => a.calendarId).map(a => a.calendarId));
           for (const event of (calData.items || [])) {
@@ -1575,8 +1579,10 @@ export default function PulseApp() {
               if (seenCalIds.has(calId)) continue;
               const title = event.summary || "";
               const desc = event.description || "";
-              const doctorType = apptClassifyDoctor(title, desc);
-              if (!doctorType) continue; // not a medical event
+              // Import if it matches medical keywords OR has "appointment" in the title
+              let doctorType = apptClassifyDoctor(title, desc);
+              if (!doctorType && /appointment/i.test(title)) doctorType = "👨‍⚕️ Primary Care";
+              if (!doctorType) continue;
               const startRaw = event.start?.dateTime || event.start?.date || "";
               const startDate = new Date(startRaw);
               if (isNaN(startDate)) continue;
@@ -1610,7 +1616,7 @@ export default function PulseApp() {
             } catch(e) { /* skip individual event errors */ }
           }
         }
-      } catch(e) { /* Calendar sync failed silently */ }
+      } catch(e) { console.warn("Calendar sync error:", e); }
 
       // Sync to Drive
       if (imported > 0 && fwWorkspace?.fileIds?.appointments && fwToken) {
