@@ -99,9 +99,9 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
-  <!-- Bootstrap: load pre-built PulseApp.js (no Babel needed at runtime) -->
+  <!-- Bootstrap: expose React hooks as globals, then load PulseApp.js as a native script tag -->
   <script>
-    // Expose all React hooks as globals so new Function() body can access them
+    // Expose all React hooks as globals so PulseApp.js can access them
     window.useState = React.useState;
     window.useEffect = React.useEffect;
     window.useRef = React.useRef;
@@ -113,25 +113,20 @@
     window.useId = React.useId;
     window.createContext = React.createContext;
     window.Fragment = React.Fragment;
+  </script>
 
-    (async function() {
-      var status = document.getElementById('boot-status');
-      function setStatus(msg) { if(status) status.textContent = msg; }
+  <!-- Load pre-built PulseApp.js as a native script (no eval, no Babel) -->
+  <script src="./PulseApp.js?v=1778003905"></script>
+
+  <!-- Mount the app after PulseApp.js has loaded -->
+  <script>
+    (function() {
       try {
-        setStatus('Step 1: Fetching PulseApp.js...');
-        var response = await fetch('./PulseApp.js?v=' + Date.now());
-        setStatus('Step 2: HTTP ' + response.status + ' received...');
-        if (!response.ok) throw new Error('HTTP ' + response.status + ' loading PulseApp.js');
-        var source = await response.text();
-        setStatus('Step 3: Got ' + source.length + ' bytes, evaluating...');
-        var wrapped = '(function(){' + source + '\nreturn __PulseApp__;})();';
-        var PulseApp = (0, eval)(wrapped);
-        setStatus('Step 4: Rendering...');
+        if (typeof __PulseApp__ === 'undefined') throw new Error('__PulseApp__ not defined — PulseApp.js failed to load');
         var root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(React.createElement(PulseApp));
+        root.render(React.createElement(__PulseApp__));
       } catch(e) {
-        document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">ERROR at: ' + (status ? status.textContent : '?') + '\n\n' + e.message + '\n\n' + (e.stack||'') + '</pre>';
-        console.error('PulseApp load error:', e);
+        document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">ERROR: ' + e.message + '\n\n' + (e.stack||'') + '</pre>';
       }
     })();
   </script>
