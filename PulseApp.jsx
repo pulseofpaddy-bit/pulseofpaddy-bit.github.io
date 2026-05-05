@@ -1182,7 +1182,7 @@ export default function PulseApp() {
   const [groceryInput, setGroceryInput] = useState("");
   const [groceryLoading, setGroceryLoading] = useState(false);
   const [groceryStore, setGroceryStore] = useState("all");
-  const groceryWritePending = React.useRef(false); // true while an add/delete write is in-flight — prevents poll from overwriting local state
+  const groceryWritePending = useRef(false); // true while an add/delete write is in-flight — prevents poll from overwriting local state
   const [groceryStores, setGroceryStores] = useState(() => { try { const s = localStorage.getItem("pulse_grocery_stores"); return s ? JSON.parse(s) : GROCERY_STORES_DEFAULT; } catch { return GROCERY_STORES_DEFAULT; } });
   const [showAddStore, setShowAddStore]   = useState(false);
   const [newStoreInput, setNewStoreInput] = useState("");
