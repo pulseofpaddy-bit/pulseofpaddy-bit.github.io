@@ -1,5 +1,4 @@
-exports.__esModule = true;
-var __PulseApp__ = PulseApp;
+
 const TMDB_API_KEY = "1c89ee56a61436b0a2c976785bb9f694";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
@@ -410,8 +409,8 @@ function TheaterMovieCard({
   T,
   isDark
 }) {
-  const [pressed, setPressed] = (0, _react.useState)(false);
-  const tsRef = (0, _react.useRef)(null);
+  const [pressed, setPressed] = useState(false);
+  const tsRef = useRef(null);
   return React.createElement("div", {
     onClick: () => onTap(movie),
     onMouseDown: () => setPressed(true),
@@ -565,9 +564,9 @@ function OTTMovieCard({
   T,
   isDark
 }) {
-  const [pressed, setPressed] = (0, _react.useState)(false);
+  const [pressed, setPressed] = useState(false);
   const pColor = PLATFORM_COLORS[movie.platform] || "#888";
-  const tsRef = (0, _react.useRef)(null);
+  const tsRef = useRef(null);
   return React.createElement("div", {
     onClick: () => onTap(movie),
     onMouseDown: () => setPressed(true),
@@ -776,7 +775,7 @@ function MovieDetailModal({
   T,
   isDark
 }) {
-  const [booking, setBooking] = (0, _react.useState)(null);
+  const [booking, setBooking] = useState(null);
   const color = isOTT ? PLATFORM_COLORS[movie.platform] || "#888" : movie.color;
   const theaters = movie.allTheaters || (movie.theater ? [{
     name: movie.theater,
@@ -1297,25 +1296,25 @@ function MovieDetailModal({
 }
 function PulseApp() {
   var _fwUser$name, _fwUser$name2, _fwUser$name3, _fwUser$name4, _pingActiveChat$membe, _fwUser$name6;
-  const [mainTab, setMainTab] = (0, _react.useState)(null);
-  const [movieTab, setMovieTab] = (0, _react.useState)(null);
-  const [fwUser, setFwUser] = (0, _react.useState)(() => {
+  const [mainTab, setMainTab] = useState(null);
+  const [movieTab, setMovieTab] = useState(null);
+  const [fwUser, setFwUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_fw_user") || "null");
     } catch {
       return null;
     }
   });
-  const [fwToken, setFwToken] = (0, _react.useState)(() => localStorage.getItem("pulse_fw_token") || null);
-  const [fwRole, setFwRole] = (0, _react.useState)(() => localStorage.getItem("pulse_fw_role") || null);
-  const [fwWorkspace, setFwWorkspace] = (0, _react.useState)(() => {
+  const [fwToken, setFwToken] = useState(() => localStorage.getItem("pulse_fw_token") || null);
+  const [fwRole, setFwRole] = useState(() => localStorage.getItem("pulse_fw_role") || null);
+  const [fwWorkspace, setFwWorkspace] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_fw_workspace") || "null");
     } catch {
       return null;
     }
   });
-  const [fwMembers, setFwMembers] = (0, _react.useState)(() => {
+  const [fwMembers, setFwMembers] = useState(() => {
     try {
       const c = localStorage.getItem('pulse_fw_members_cache');
       return c ? JSON.parse(c) : [];
@@ -1323,17 +1322,17 @@ function PulseApp() {
       return [];
     }
   });
-  const [fwSharedFolderKey, setFwSharedFolderKey] = (0, _react.useState)(() => localStorage.getItem("pulse_fw_shared_key") || null);
-  const [fwScreen, setFwScreen] = (0, _react.useState)("home");
-  const [fwLoading, setFwLoading] = (0, _react.useState)(false);
-  const [fwError, setFwError] = (0, _react.useState)("");
-  const [fwInviteEmail, setFwInviteEmail] = (0, _react.useState)("");
-  const [fwInviteStatus, setFwInviteStatus] = (0, _react.useState)("");
-  const [fwShowInvite, setFwShowInvite] = (0, _react.useState)(false);
-  const [fwInviteName, setFwInviteName] = (0, _react.useState)("");
-  const [fwInviteError, setFwInviteError] = (0, _react.useState)("");
-  const [fwInviteGender, setFwInviteGender] = (0, _react.useState)("");
-  const [onboardingStep, setOnboardingStep] = (0, _react.useState)(() => {
+  const [fwSharedFolderKey, setFwSharedFolderKey] = useState(() => localStorage.getItem("pulse_fw_shared_key") || null);
+  const [fwScreen, setFwScreen] = useState("home");
+  const [fwLoading, setFwLoading] = useState(false);
+  const [fwError, setFwError] = useState("");
+  const [fwInviteEmail, setFwInviteEmail] = useState("");
+  const [fwInviteStatus, setFwInviteStatus] = useState("");
+  const [fwShowInvite, setFwShowInvite] = useState(false);
+  const [fwInviteName, setFwInviteName] = useState("");
+  const [fwInviteError, setFwInviteError] = useState("");
+  const [fwInviteGender, setFwInviteGender] = useState("");
+  const [onboardingStep, setOnboardingStep] = useState(() => {
     const user = localStorage.getItem("pulse_fw_user");
     const role = localStorage.getItem("pulse_fw_role");
     if (user && user !== "null" && role) {
@@ -1351,12 +1350,12 @@ function PulseApp() {
     if (user && user !== "null" && !role) return "role";
     return "splash";
   });
-  const [onboardingAddEmails, setOnboardingAddEmails] = (0, _react.useState)([""]);
-  const [onboardingAddNames, setOnboardingAddNames] = (0, _react.useState)([""]);
-  const [onboardingAddGenders, setOnboardingAddGenders] = (0, _react.useState)([""]);
-  const [onboardingInviting, setOnboardingInviting] = (0, _react.useState)(false);
-  const [onboardingMemberError, setOnboardingMemberError] = (0, _react.useState)("");
-  const [onboardingGender, setOnboardingGender] = (0, _react.useState)(() => {
+  const [onboardingAddEmails, setOnboardingAddEmails] = useState([""]);
+  const [onboardingAddNames, setOnboardingAddNames] = useState([""]);
+  const [onboardingAddGenders, setOnboardingAddGenders] = useState([""]);
+  const [onboardingInviting, setOnboardingInviting] = useState(false);
+  const [onboardingMemberError, setOnboardingMemberError] = useState("");
+  const [onboardingGender, setOnboardingGender] = useState(() => {
     try {
       const user = localStorage.getItem("pulse_fw_user");
       if (user && user !== "null") {
@@ -1371,22 +1370,22 @@ function PulseApp() {
     } catch {}
     return "";
   });
-  const [editingProfile, setEditingProfile] = (0, _react.useState)(false);
-  const [editName, setEditName] = (0, _react.useState)("");
-  const [reminderWindow, setReminderWindow] = (0, _react.useState)(() => localStorage.getItem("pulse_reminder_window") || "1 Day");
-  const [notifSound, setNotifSound] = (0, _react.useState)(() => localStorage.getItem("pulse_notif_sound") || "Heartbeat Pulse");
-  const [theaterCountry, setTheaterCountry] = (0, _react.useState)("american");
-  const [ottCategory, setOttCategory] = (0, _react.useState)("global");
-  const [nearbyTheaters, setNearbyTheaters] = (0, _react.useState)([]);
-  const nearbyTheatersRef = (0, _react.useRef)([]);
-  const [theaterGeoLoading, setTheaterGeoLoading] = (0, _react.useState)(false);
-  const [theaterGeoError, setTheaterGeoError] = (0, _react.useState)(null);
-  const [theaterCity, setTheaterCity] = (0, _react.useState)(null);
-  const [theaterCoords, setTheaterCoords] = (0, _react.useState)(null);
-  const [tmdbTheater, setTmdbTheater] = (0, _react.useState)({});
-  const [tmdbOTT, setTmdbOTT] = (0, _react.useState)({});
-  const [tmdbLoading, setTmdbLoading] = (0, _react.useState)({});
-  const [tmdbError, setTmdbError] = (0, _react.useState)({});
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [reminderWindow, setReminderWindow] = useState(() => localStorage.getItem("pulse_reminder_window") || "1 Day");
+  const [notifSound, setNotifSound] = useState(() => localStorage.getItem("pulse_notif_sound") || "Heartbeat Pulse");
+  const [theaterCountry, setTheaterCountry] = useState("american");
+  const [ottCategory, setOttCategory] = useState("global");
+  const [nearbyTheaters, setNearbyTheaters] = useState([]);
+  const nearbyTheatersRef = useRef([]);
+  const [theaterGeoLoading, setTheaterGeoLoading] = useState(false);
+  const [theaterGeoError, setTheaterGeoError] = useState(null);
+  const [theaterCity, setTheaterCity] = useState(null);
+  const [theaterCoords, setTheaterCoords] = useState(null);
+  const [tmdbTheater, setTmdbTheater] = useState({});
+  const [tmdbOTT, setTmdbOTT] = useState({});
+  const [tmdbLoading, setTmdbLoading] = useState({});
+  const [tmdbError, setTmdbError] = useState({});
   const TMDB_NO_KEY = TMDB_API_KEY === "YOUR_TMDB_API_KEY";
   async function fetchTheaterMovies(country) {
     if (tmdbTheater[country]) return;
@@ -1773,11 +1772,11 @@ function PulseApp() {
     }
     setTheaterGeoLoading(false);
   }
-  const fetchNearbyTheatersRef = (0, _react.useRef)(fetchNearbyTheaters);
-  (0, _react.useEffect)(() => {
+  const fetchNearbyTheatersRef = useRef(fetchNearbyTheaters);
+  useEffect(() => {
     fetchNearbyTheatersRef.current = fetchNearbyTheaters;
   });
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "movies" && movieTab === "theater") {
       setTheaterGeoLoading(true);
       if (navigator.geolocation) {
@@ -1818,33 +1817,33 @@ function PulseApp() {
       }
     }
   }, [mainTab, movieTab]);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "movies" && movieTab === "theater") fetchTheaterMovies(theaterCountry);
   }, [mainTab, movieTab, theaterCountry]);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "movies" && movieTab === "ott") fetchOTTMovies(ottCategory);
   }, [mainTab, movieTab, ottCategory]);
-  const [selectedMovie, setSelectedMovie] = (0, _react.useState)(null);
-  const [isOTTMovie, setIsOTTMovie] = (0, _react.useState)(false);
-  const [time, setTime] = (0, _react.useState)(new Date());
-  const [themeOverride, setThemeOverride] = (0, _react.useState)(null);
-  const [homeWeather, setHomeWeather] = (0, _react.useState)(null);
-  const [hydWeather, setHydWeather] = (0, _react.useState)(null);
-  const [secondCountry, setSecondCountry] = (0, _react.useState)(() => {
+  const [selectedMovie, setSelectedMovie] = useState(null);
+  const [isOTTMovie, setIsOTTMovie] = useState(false);
+  const [time, setTime] = useState(new Date());
+  const [themeOverride, setThemeOverride] = useState(null);
+  const [homeWeather, setHomeWeather] = useState(null);
+  const [hydWeather, setHydWeather] = useState(null);
+  const [secondCountry, setSecondCountry] = useState(() => {
     const saved = localStorage.getItem("pulse_second_country");
     return SECOND_COUNTRY_OPTIONS.find(c => c.key === saved) || SECOND_COUNTRY_OPTIONS[0];
   });
-  const [restaurantCuisine, setRestaurantCuisine] = (0, _react.useState)("american");
-  const [restaurants, setRestaurants] = (0, _react.useState)([]);
-  const [restaurantLoading, setRestaurantLoading] = (0, _react.useState)(false);
-  const [restaurantError, setRestaurantError] = (0, _react.useState)(null);
-  const [cityInput, setCityInput] = (0, _react.useState)("");
-  const [searchedCity, setSearchedCity] = (0, _react.useState)(null);
-  (0, _react.useEffect)(() => {
+  const [restaurantCuisine, setRestaurantCuisine] = useState("american");
+  const [restaurants, setRestaurants] = useState([]);
+  const [restaurantLoading, setRestaurantLoading] = useState(false);
+  const [restaurantError, setRestaurantError] = useState(null);
+  const [cityInput, setCityInput] = useState("");
+  const [searchedCity, setSearchedCity] = useState(null);
+  useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     async function fetchWeather() {
       try {
         var _cantonData$current, _secData$current;
@@ -1954,20 +1953,20 @@ function PulseApp() {
       setFwMembers(prev => prev.filter(m => m.name !== name));
     }
   }
-  const [userCity, setUserCity] = (0, _react.useState)(null);
-  const [userCoords, setUserCoords] = (0, _react.useState)(null);
-  const [groceryItems, setGroceryItems] = (0, _react.useState)(() => {
+  const [userCity, setUserCity] = useState(null);
+  const [userCoords, setUserCoords] = useState(null);
+  const [groceryItems, setGroceryItems] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_grocery_items") || "[]");
     } catch {
       return [];
     }
   });
-  const [groceryInput, setGroceryInput] = (0, _react.useState)("");
-  const [groceryLoading, setGroceryLoading] = (0, _react.useState)(false);
-  const [groceryStore, setGroceryStore] = (0, _react.useState)("all");
+  const [groceryInput, setGroceryInput] = useState("");
+  const [groceryLoading, setGroceryLoading] = useState(false);
+  const [groceryStore, setGroceryStore] = useState("all");
   const groceryWritePending = React.useRef(false);
-  const [groceryStores, setGroceryStores] = (0, _react.useState)(() => {
+  const [groceryStores, setGroceryStores] = useState(() => {
     try {
       const s = localStorage.getItem("pulse_grocery_stores");
       return s ? JSON.parse(s) : GROCERY_STORES_DEFAULT;
@@ -1975,8 +1974,8 @@ function PulseApp() {
       return GROCERY_STORES_DEFAULT;
     }
   });
-  const [showAddStore, setShowAddStore] = (0, _react.useState)(false);
-  const [newStoreInput, setNewStoreInput] = (0, _react.useState)("");
+  const [showAddStore, setShowAddStore] = useState(false);
+  const [newStoreInput, setNewStoreInput] = useState("");
   async function addGroceryStore() {
     var _fwWorkspace$fileIds3;
     const name = newStoreInput.trim();
@@ -2016,7 +2015,7 @@ function PulseApp() {
       }], fwToken);
     }
   }
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab !== "grocery") return;
     const sharedKey = fwSharedFolderKey || (fwWorkspace == null ? void 0 : fwWorkspace.folderId);
     if (!sharedKey) return;
@@ -2176,16 +2175,16 @@ function PulseApp() {
       }).catch(() => {})));
     }
   }
-  const [apptItems, setApptItems] = (0, _react.useState)(() => {
+  const [apptItems, setApptItems] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_appointments") || "[]");
     } catch {
       return [];
     }
   });
-  const [apptLoading, setApptLoading] = (0, _react.useState)(false);
-  const [showApptForm, setShowApptForm] = (0, _react.useState)(false);
-  const [apptForm, setApptForm] = (0, _react.useState)({
+  const [apptLoading, setApptLoading] = useState(false);
+  const [showApptForm, setShowApptForm] = useState(false);
+  const [apptForm, setApptForm] = useState({
     doctor: "",
     doctorName: "",
     address: "",
@@ -2194,17 +2193,17 @@ function PulseApp() {
     time: "",
     notes: ""
   });
-  const [apptEditId, setApptEditId] = (0, _react.useState)(null);
-  const [apptFilterMember, setApptFilterMember] = (0, _react.useState)("All");
+  const [apptEditId, setApptEditId] = useState(null);
+  const [apptFilterMember, setApptFilterMember] = useState("All");
   const familyMembers = (() => {
     const me = (fwUser == null ? void 0 : fwUser.name) || "Me";
     const others = fwMembers.filter(m => m.email !== (fwUser == null ? void 0 : fwUser.email)).map(m => m.name || m.email.split("@")[0]);
     return [me, ...others];
   })();
-  const [showAddMember, setShowAddMember] = (0, _react.useState)(false);
-  const [newMemberInput, setNewMemberInput] = (0, _react.useState)("");
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [newMemberInput, setNewMemberInput] = useState("");
   const DOCTOR_TYPES = ["👨‍⚕️ Primary Care", "👶 Pediatrician", "👩‍⚕️ Gynecologist", "🦷 Dentist", "👁️ Eye Doctor", "🧠 Specialist", "💊 Pharmacy", "🏥 Hospital", "🩺 Other"];
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "doctor") loadAppts();
   }, [mainTab]);
   async function loadAppts() {
@@ -2303,8 +2302,8 @@ function PulseApp() {
       } : i), fwToken);
     }
   }
-  const [apptSyncing, setApptSyncing] = (0, _react.useState)(false);
-  const [apptSyncMsg, setApptSyncMsg] = (0, _react.useState)("");
+  const [apptSyncing, setApptSyncing] = useState(false);
+  const [apptSyncMsg, setApptSyncMsg] = useState("");
   function apptDecodeBody(rawBody) {
     try {
       const b64 = rawBody.replace(/-/g, '+').replace(/_/g, '/');
@@ -2545,21 +2544,21 @@ function PulseApp() {
     setApptSyncing(false);
     setTimeout(() => setApptSyncMsg(""), 4000);
   }
-  const [todoItems, setTodoItems] = (0, _react.useState)(() => {
+  const [todoItems, setTodoItems] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_todo_items") || "[]");
     } catch {
       return [];
     }
   });
-  const [todoInput, setTodoInput] = (0, _react.useState)("");
-  const [todoLoading, setTodoLoading] = (0, _react.useState)(false);
-  const [editingTodoId, setEditingTodoId] = (0, _react.useState)(null);
-  const [showAddTodo, setShowAddTodo] = (0, _react.useState)(false);
-  const [editTodoText, setEditTodoText] = (0, _react.useState)("");
-  const [editTodoPriority, setEditTodoPriority] = (0, _react.useState)("medium");
-  const [editTodoDueDate, setEditTodoDueDate] = (0, _react.useState)("");
-  const [todoAssignee, setTodoAssignee] = (0, _react.useState)("all");
+  const [todoInput, setTodoInput] = useState("");
+  const [todoLoading, setTodoLoading] = useState(false);
+  const [editingTodoId, setEditingTodoId] = useState(null);
+  const [showAddTodo, setShowAddTodo] = useState(false);
+  const [editTodoText, setEditTodoText] = useState("");
+  const [editTodoPriority, setEditTodoPriority] = useState("medium");
+  const [editTodoDueDate, setEditTodoDueDate] = useState("");
+  const [todoAssignee, setTodoAssignee] = useState("all");
   const TODO_PRIORITIES = [{
     id: "high",
     label: "🔴 High",
@@ -2573,15 +2572,15 @@ function PulseApp() {
     label: "🟢 Low",
     color: "#00C864"
   }];
-  const [todoPriority, setTodoPriority] = (0, _react.useState)("medium");
-  const [todoDueDate, setTodoDueDate] = (0, _react.useState)("");
-  const [notifPermission, setNotifPermission] = (0, _react.useState)(typeof Notification !== "undefined" ? Notification.permission : "default");
-  (0, _react.useEffect)(() => {
+  const [todoPriority, setTodoPriority] = useState("medium");
+  const [todoDueDate, setTodoDueDate] = useState("");
+  const [notifPermission, setNotifPermission] = useState(typeof Notification !== "undefined" ? Notification.permission : "default");
+  useEffect(() => {
     if (mainTab === "todo" && typeof Notification !== "undefined" && Notification.permission === "default") {
       Notification.requestPermission().then(p => setNotifPermission(p));
     }
   }, [mainTab]);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     function checkDueDateNotifs() {
       const tomorrow = new Date();
@@ -2596,7 +2595,7 @@ function PulseApp() {
     }
     checkDueDateNotifs();
   }, [todoItems]);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "todo") loadTodos();
   }, [mainTab]);
   async function loadTodos() {
@@ -2713,15 +2712,15 @@ function PulseApp() {
   const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
   const GOOGLE_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly email profile openid";
   const MAX_ACCOUNTS = 5;
-  const [gAccounts, setGAccounts] = (0, _react.useState)(() => {
+  const [gAccounts, setGAccounts] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_gaccounts") || "[]");
     } catch (e) {
       return [];
     }
   });
-  const [gSyncing, setGSyncing] = (0, _react.useState)({});
-  const [gSyncMsg, setGSyncMsg] = (0, _react.useState)({});
+  const [gSyncing, setGSyncing] = useState({});
+  const [gSyncMsg, setGSyncMsg] = useState({});
   function saveGAccounts(accounts) {
     setGAccounts(accounts);
     localStorage.setItem("pulse_gaccounts", JSON.stringify(accounts));
@@ -2752,7 +2751,7 @@ function PulseApp() {
       return n;
     });
   }
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     const hash = window.location.hash;
     if (hash.includes("access_token") && sessionStorage.getItem("pulse_adding_account")) {
       sessionStorage.removeItem("pulse_adding_account");
@@ -2992,16 +2991,16 @@ function PulseApp() {
       });
     }
   }
-  const [resvItems, setResvItems] = (0, _react.useState)(() => {
+  const [resvItems, setResvItems] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_resv_items") || "[]");
     } catch {
       return [];
     }
   });
-  const [resvLoading, setResvLoading] = (0, _react.useState)(false);
-  const [showResvForm, setShowResvForm] = (0, _react.useState)(false);
-  const [resvForm, setResvForm] = (0, _react.useState)({
+  const [resvLoading, setResvLoading] = useState(false);
+  const [showResvForm, setShowResvForm] = useState(false);
+  const [resvForm, setResvForm] = useState({
     type: "",
     name: "",
     date: "",
@@ -3012,7 +3011,7 @@ function PulseApp() {
     notes: "",
     assignedTo: ""
   });
-  const [resvFilterType, setResvFilterType] = (0, _react.useState)("all");
+  const [resvFilterType, setResvFilterType] = useState("all");
   const _resvUserKey = ((fwUser == null ? void 0 : fwUser.email) || "shared").replace(/[.#$[\]]/g, ",");
   const RESV_URL = `https://pulse-family-default-rtdb.firebaseio.com/reservations/${_resvUserKey}`;
   const _fwKey = ((fwWorkspace == null ? void 0 : fwWorkspace.folderId) || (fwUser == null ? void 0 : fwUser.email) || "shared").replace(/[.#$\[\]]/g, ",");
@@ -3041,7 +3040,7 @@ function PulseApp() {
     emoji: "🎳",
     color: "#F59E0B"
   }];
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "reservations") {
       loadResvs().then(() => {
         if (gAccounts.length > 0) {
@@ -3178,17 +3177,17 @@ function PulseApp() {
       });
     } catch (e) {}
   }
-  const [clothingItems, setClothingItems] = (0, _react.useState)(() => {
+  const [clothingItems, setClothingItems] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_clothing_items") || "[]");
     } catch {
       return [];
     }
   });
-  const [clothingInput, setClothingInput] = (0, _react.useState)("");
-  const [clothingLoading, setClothingLoading] = (0, _react.useState)(false);
-  const [clothingMember, setClothingMember] = (0, _react.useState)("all");
-  const [clothingCategory, setClothingCategory] = (0, _react.useState)("all");
+  const [clothingInput, setClothingInput] = useState("");
+  const [clothingLoading, setClothingLoading] = useState(false);
+  const [clothingMember, setClothingMember] = useState("all");
+  const [clothingCategory, setClothingCategory] = useState("all");
   const _clothUserKey = ((fwUser == null ? void 0 : fwUser.email) || "shared").replace(/[.#$[\]]/g, ",");
   const CLOTHING_URL = `https://pulse-family-default-rtdb.firebaseio.com/clothing/${_clothUserKey}`;
   const CLOTHING_CATEGORIES = [{
@@ -3227,21 +3226,21 @@ function PulseApp() {
     emoji: "🔍️",
     color: "#6B7280"
   }];
-  const [ctContacts, setCtContacts] = (0, _react.useState)(() => {
+  const [ctContacts, setCtContacts] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_contacts") || "[]");
     } catch {
       return [];
     }
   });
-  const [ctShowAdd, setCtShowAdd] = (0, _react.useState)(false);
-  const [ctEditId, setCtEditId] = (0, _react.useState)(null);
-  const [ctName, setCtName] = (0, _react.useState)("");
-  const [ctPhone, setCtPhone] = (0, _react.useState)("");
-  const [ctAddress, setCtAddress] = (0, _react.useState)("");
-  const [ctMember, setCtMember] = (0, _react.useState)("me");
-  const [ctSearch, setCtSearch] = (0, _react.useState)("");
-  const [ctSelectedMember, setCtSelectedMember] = (0, _react.useState)("all");
+  const [ctShowAdd, setCtShowAdd] = useState(false);
+  const [ctEditId, setCtEditId] = useState(null);
+  const [ctName, setCtName] = useState("");
+  const [ctPhone, setCtPhone] = useState("");
+  const [ctAddress, setCtAddress] = useState("");
+  const [ctMember, setCtMember] = useState("me");
+  const [ctSearch, setCtSearch] = useState("");
+  const [ctSelectedMember, setCtSelectedMember] = useState("all");
   function ctSaveContacts(updated) {
     var _fwWorkspace$fileIds14;
     setCtContacts(updated);
@@ -3283,44 +3282,44 @@ function PulseApp() {
     setCtMember(c.member || "me");
     setCtShowAdd(true);
   }
-  const [finTab, setFinTab] = (0, _react.useState)("reminders");
-  const [payReminders, setPayReminders] = (0, _react.useState)(() => {
+  const [finTab, setFinTab] = useState("reminders");
+  const [payReminders, setPayReminders] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_pay_reminders") || "[]");
     } catch {
       return [];
     }
   });
-  const [prShowAdd, setPrShowAdd] = (0, _react.useState)(false);
-  const [prEditId, setPrEditId] = (0, _react.useState)(null);
-  const [prName, setPrName] = (0, _react.useState)("");
-  const [prAmount, setPrAmount] = (0, _react.useState)("");
-  const [prCurrency, setPrCurrency] = (0, _react.useState)("USD");
-  const [prDueDate, setPrDueDate] = (0, _react.useState)("");
-  const [prRecurrence, setPrRecurrence] = (0, _react.useState)("Monthly");
-  const [prCategory, setPrCategory] = (0, _react.useState)("Bill");
-  const [prNotes, setPrNotes] = (0, _react.useState)("");
-  const [prCardLast4, setPrCardLast4] = (0, _react.useState)("");
-  const [prCardBank, setPrCardBank] = (0, _react.useState)("");
-  const [prMinDue, setPrMinDue] = (0, _react.useState)("");
-  const [prTotalDue, setPrTotalDue] = (0, _react.useState)("");
-  const [prStatementDate, setPrStatementDate] = (0, _react.useState)("");
-  const [prCreditLimit, setPrCreditLimit] = (0, _react.useState)("");
-  const [moneyLent, setMoneyLent] = (0, _react.useState)(() => {
+  const [prShowAdd, setPrShowAdd] = useState(false);
+  const [prEditId, setPrEditId] = useState(null);
+  const [prName, setPrName] = useState("");
+  const [prAmount, setPrAmount] = useState("");
+  const [prCurrency, setPrCurrency] = useState("USD");
+  const [prDueDate, setPrDueDate] = useState("");
+  const [prRecurrence, setPrRecurrence] = useState("Monthly");
+  const [prCategory, setPrCategory] = useState("Bill");
+  const [prNotes, setPrNotes] = useState("");
+  const [prCardLast4, setPrCardLast4] = useState("");
+  const [prCardBank, setPrCardBank] = useState("");
+  const [prMinDue, setPrMinDue] = useState("");
+  const [prTotalDue, setPrTotalDue] = useState("");
+  const [prStatementDate, setPrStatementDate] = useState("");
+  const [prCreditLimit, setPrCreditLimit] = useState("");
+  const [moneyLent, setMoneyLent] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_money_lent") || "[]");
     } catch {
       return [];
     }
   });
-  const [mlShowAdd, setMlShowAdd] = (0, _react.useState)(false);
-  const [mlEditId, setMlEditId] = (0, _react.useState)(null);
-  const [mlFriend, setMlFriend] = (0, _react.useState)("");
-  const [mlAmount, setMlAmount] = (0, _react.useState)("");
-  const [mlCurrency, setMlCurrency] = (0, _react.useState)("USD");
-  const [mlDate, setMlDate] = (0, _react.useState)("");
-  const [mlNote, setMlNote] = (0, _react.useState)("");
-  const [mlStatus, setMlStatus] = (0, _react.useState)("pending");
+  const [mlShowAdd, setMlShowAdd] = useState(false);
+  const [mlEditId, setMlEditId] = useState(null);
+  const [mlFriend, setMlFriend] = useState("");
+  const [mlAmount, setMlAmount] = useState("");
+  const [mlCurrency, setMlCurrency] = useState("USD");
+  const [mlDate, setMlDate] = useState("");
+  const [mlNote, setMlNote] = useState("");
+  const [mlStatus, setMlStatus] = useState("pending");
   function prSave(items) {
     var _fwWorkspace$fileIds15;
     setPayReminders(items);
@@ -3450,40 +3449,40 @@ function PulseApp() {
       status: r.status === "returned" ? "pending" : "returned"
     } : r));
   }
-  const [sfItems, setSfItems] = (0, _react.useState)([]);
-  const [sfUnlocked, setSfUnlocked] = (0, _react.useState)(false);
-  const [sfPinInput, setSfPinInput] = (0, _react.useState)("");
-  const [sfPinError, setSfPinError] = (0, _react.useState)("");
-  const [sfShowAdd, setSfShowAdd] = (0, _react.useState)(false);
-  const [sfEditId, setSfEditId] = (0, _react.useState)(null);
-  const [sfTab, setSfTab] = (0, _react.useState)("bank");
-  const [sfSearch, setSfSearch] = (0, _react.useState)("");
-  const [sfShowPw, setSfShowPw] = (0, _react.useState)({});
-  const [sfViewItem, setSfViewItem] = (0, _react.useState)(null);
-  const [sfType, setSfType] = (0, _react.useState)("bank");
-  const [sfLabel, setSfLabel] = (0, _react.useState)("");
-  const [sfBankName, setSfBankName] = (0, _react.useState)("");
-  const [sfAccNo, setSfAccNo] = (0, _react.useState)("");
-  const [sfIfsc, setSfIfsc] = (0, _react.useState)("");
-  const [sfAccHolder, setSfAccHolder] = (0, _react.useState)("");
-  const [sfAccType, setSfAccType] = (0, _react.useState)("Savings");
-  const [sfUpi, setSfUpi] = (0, _react.useState)("");
-  const [sfNotes, setSfNotes] = (0, _react.useState)("");
-  const [sfBankCountry, setSfBankCountry] = (0, _react.useState)("US");
-  const [sfRoutingNo, setSfRoutingNo] = (0, _react.useState)("");
-  const [sfBankUserId, setSfBankUserId] = (0, _react.useState)("");
-  const [sfBankPassword, setSfBankPassword] = (0, _react.useState)("");
-  const [sfRegEmail, setSfRegEmail] = (0, _react.useState)("");
-  const [sfSiteName, setSfSiteName] = (0, _react.useState)("");
-  const [sfUsername, setSfUsername] = (0, _react.useState)("");
-  const [sfPassword, setSfPassword] = (0, _react.useState)("");
-  const [sfUrl, setSfUrl] = (0, _react.useState)("");
+  const [sfItems, setSfItems] = useState([]);
+  const [sfUnlocked, setSfUnlocked] = useState(false);
+  const [sfPinInput, setSfPinInput] = useState("");
+  const [sfPinError, setSfPinError] = useState("");
+  const [sfShowAdd, setSfShowAdd] = useState(false);
+  const [sfEditId, setSfEditId] = useState(null);
+  const [sfTab, setSfTab] = useState("bank");
+  const [sfSearch, setSfSearch] = useState("");
+  const [sfShowPw, setSfShowPw] = useState({});
+  const [sfViewItem, setSfViewItem] = useState(null);
+  const [sfType, setSfType] = useState("bank");
+  const [sfLabel, setSfLabel] = useState("");
+  const [sfBankName, setSfBankName] = useState("");
+  const [sfAccNo, setSfAccNo] = useState("");
+  const [sfIfsc, setSfIfsc] = useState("");
+  const [sfAccHolder, setSfAccHolder] = useState("");
+  const [sfAccType, setSfAccType] = useState("Savings");
+  const [sfUpi, setSfUpi] = useState("");
+  const [sfNotes, setSfNotes] = useState("");
+  const [sfBankCountry, setSfBankCountry] = useState("US");
+  const [sfRoutingNo, setSfRoutingNo] = useState("");
+  const [sfBankUserId, setSfBankUserId] = useState("");
+  const [sfBankPassword, setSfBankPassword] = useState("");
+  const [sfRegEmail, setSfRegEmail] = useState("");
+  const [sfSiteName, setSfSiteName] = useState("");
+  const [sfUsername, setSfUsername] = useState("");
+  const [sfPassword, setSfPassword] = useState("");
+  const [sfUrl, setSfUrl] = useState("");
   const SF_PIN_KEY = "pulse_sf_pin";
   const SF_DATA_KEY = "pulse_sf_data";
   const SF_DRIVE_KEY = "pulse_sf_drive_id";
-  const [sfDriveFileId, setSfDriveFileId] = (0, _react.useState)(() => localStorage.getItem(SF_DRIVE_KEY) || null);
+  const [sfDriveFileId, setSfDriveFileId] = useState(() => localStorage.getItem(SF_DRIVE_KEY) || null);
   const SETTINGS_DRIVE_KEY = "pulse_settings_drive_id";
-  const [settingsDriveFileId, setSettingsDriveFileId] = (0, _react.useState)(() => localStorage.getItem(SETTINGS_DRIVE_KEY) || null);
+  const [settingsDriveFileId, setSettingsDriveFileId] = useState(() => localStorage.getItem(SETTINGS_DRIVE_KEY) || null);
   async function settingsInitDriveFile(token) {
     const cached = localStorage.getItem(SETTINGS_DRIVE_KEY);
     if (cached) {
@@ -3800,14 +3799,14 @@ function PulseApp() {
     setSfViewItem(null);
     sfCancelRecovery();
   }
-  const [sfChangingPin, setSfChangingPin] = (0, _react.useState)(false);
-  const [sfNewPin, setSfNewPin] = (0, _react.useState)("");
-  const [sfRecovering, setSfRecovering] = (0, _react.useState)(false);
-  const [sfOtpCode, setSfOtpCode] = (0, _react.useState)("");
-  const [sfOtpInput, setSfOtpInput] = (0, _react.useState)("");
-  const [sfOtpSending, setSfOtpSending] = (0, _react.useState)(false);
-  const [sfOtpVerified, setSfOtpVerified] = (0, _react.useState)(false);
-  const [sfResetPin, setSfResetPin] = (0, _react.useState)("");
+  const [sfChangingPin, setSfChangingPin] = useState(false);
+  const [sfNewPin, setSfNewPin] = useState("");
+  const [sfRecovering, setSfRecovering] = useState(false);
+  const [sfOtpCode, setSfOtpCode] = useState("");
+  const [sfOtpInput, setSfOtpInput] = useState("");
+  const [sfOtpSending, setSfOtpSending] = useState(false);
+  const [sfOtpVerified, setSfOtpVerified] = useState(false);
+  const [sfResetPin, setSfResetPin] = useState("");
   async function sfSendOtp() {
     if (!(fwUser != null && fwUser.email) || !fwToken) {
       setSfPinError("Please sign in to your Google account first");
@@ -3911,40 +3910,40 @@ function PulseApp() {
     setSfPinSuccess("✅ PIN changed successfully!");
     setTimeout(() => setSfPinSuccess(""), 3000);
   }
-  const [sfPinSuccess, setSfPinSuccess] = (0, _react.useState)("");
-  const [pcPeriods, setPcPeriods] = (0, _react.useState)(() => {
+  const [sfPinSuccess, setSfPinSuccess] = useState("");
+  const [pcPeriods, setPcPeriods] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_pc_periods") || "[]");
     } catch {
       return [];
     }
   });
-  const [pcCycleLength, setPcCycleLength] = (0, _react.useState)(() => parseInt(localStorage.getItem("pulse_pc_cycle") || "28", 10));
-  const [pcPeriodLength, setPcPeriodLength] = (0, _react.useState)(() => parseInt(localStorage.getItem("pulse_pc_period_len") || "5", 10));
-  const [pcSelectedMonth, setPcSelectedMonth] = (0, _react.useState)(() => {
+  const [pcCycleLength, setPcCycleLength] = useState(() => parseInt(localStorage.getItem("pulse_pc_cycle") || "28", 10));
+  const [pcPeriodLength, setPcPeriodLength] = useState(() => parseInt(localStorage.getItem("pulse_pc_period_len") || "5", 10));
+  const [pcSelectedMonth, setPcSelectedMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
-  const [pcShowLog, setPcShowLog] = (0, _react.useState)(false);
-  const [pcLogDate, setPcLogDate] = (0, _react.useState)("");
-  const [pcSymptoms, setPcSymptoms] = (0, _react.useState)([]);
-  const [pcMood, setPcMood] = (0, _react.useState)("");
-  const [pcNotes, setPcNotes] = (0, _react.useState)("");
-  const [pcSelectedMember, setPcSelectedMember] = (0, _react.useState)("me");
-  const [pcDischarge, setPcDischarge] = (0, _react.useState)("");
-  const [pcFlow, setPcFlow] = (0, _react.useState)("");
-  const [pcLogType, setPcLogType] = (0, _react.useState)("period");
-  const [pcPregnancy, setPcPregnancy] = (0, _react.useState)(() => {
+  const [pcShowLog, setPcShowLog] = useState(false);
+  const [pcLogDate, setPcLogDate] = useState("");
+  const [pcSymptoms, setPcSymptoms] = useState([]);
+  const [pcMood, setPcMood] = useState("");
+  const [pcNotes, setPcNotes] = useState("");
+  const [pcSelectedMember, setPcSelectedMember] = useState("me");
+  const [pcDischarge, setPcDischarge] = useState("");
+  const [pcFlow, setPcFlow] = useState("");
+  const [pcLogType, setPcLogType] = useState("period");
+  const [pcPregnancy, setPcPregnancy] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_pc_pregnancy") || "null");
     } catch {
       return null;
     }
   });
-  const [pcShowPregnancyModal, setPcShowPregnancyModal] = (0, _react.useState)(false);
-  const [pcTestResult, setPcTestResult] = (0, _react.useState)("");
-  const [pcTestDate, setPcTestDate] = (0, _react.useState)("");
-  const [pcLmpDate, setPcLmpDate] = (0, _react.useState)("");
+  const [pcShowPregnancyModal, setPcShowPregnancyModal] = useState(false);
+  const [pcTestResult, setPcTestResult] = useState("");
+  const [pcTestDate, setPcTestDate] = useState("");
+  const [pcLmpDate, setPcLmpDate] = useState("");
   const PC_SYMPTOMS = ["Cramps", "Headache", "Bloating", "Fatigue", "Back Pain", "Nausea", "Acne", "Breast Tenderness", "Mood Swings", "Insomnia", "Dizziness", "Hot Flashes"];
   const PC_MOODS = [{
     emoji: "😊",
@@ -4216,7 +4215,7 @@ function PulseApp() {
       };
     });
   }
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "clothing") loadClothing();
   }, [mainTab]);
   async function loadClothing() {
@@ -4313,35 +4312,35 @@ function PulseApp() {
   }
   const PING_GOOGLE_CLIENT_ID = "360320151404-1miklman0sr6gends9nuuuggecauneea.apps.googleusercontent.com";
   const PING_GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
-  const [pingScreen, setPingScreen] = (0, _react.useState)("home");
-  const [pingMe, setPingMe] = (0, _react.useState)(() => {
+  const [pingScreen, setPingScreen] = useState("home");
+  const [pingMe, setPingMe] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("pulse_ping_user") || "null");
     } catch {
       return null;
     }
   });
-  const [pingToken, setPingToken] = (0, _react.useState)(() => localStorage.getItem("pulse_ping_token") || "");
-  const [pingEncryptEnabled, setPingEncryptEnabled] = (0, _react.useState)(() => localStorage.getItem("pulse_ping_encrypt") === "true");
-  const [pingPassword, setPingPassword] = (0, _react.useState)(() => sessionStorage.getItem("pulse_ping_pass") || "PulseDefaultKey2026");
-  const [pingPasswordInput, setPingPasswordInput] = (0, _react.useState)("");
-  const [pingPasswordConfirm, setPingPasswordConfirm] = (0, _react.useState)("");
-  const [pingUsers, setPingUsers] = (0, _react.useState)([]);
-  const [pingGroups, setPingGroups] = (0, _react.useState)([]);
-  const [pingChats, setPingChats] = (0, _react.useState)([]);
-  const [pingActiveChat, setPingActiveChat] = (0, _react.useState)(null);
-  const [pingMessages, setPingMessages] = (0, _react.useState)([]);
-  const [pingInput, setPingInput] = (0, _react.useState)("");
-  const [pingNewGroup, setPingNewGroup] = (0, _react.useState)({
+  const [pingToken, setPingToken] = useState(() => localStorage.getItem("pulse_ping_token") || "");
+  const [pingEncryptEnabled, setPingEncryptEnabled] = useState(() => localStorage.getItem("pulse_ping_encrypt") === "true");
+  const [pingPassword, setPingPassword] = useState(() => sessionStorage.getItem("pulse_ping_pass") || "PulseDefaultKey2026");
+  const [pingPasswordInput, setPingPasswordInput] = useState("");
+  const [pingPasswordConfirm, setPingPasswordConfirm] = useState("");
+  const [pingUsers, setPingUsers] = useState([]);
+  const [pingGroups, setPingGroups] = useState([]);
+  const [pingChats, setPingChats] = useState([]);
+  const [pingActiveChat, setPingActiveChat] = useState(null);
+  const [pingMessages, setPingMessages] = useState([]);
+  const [pingInput, setPingInput] = useState("");
+  const [pingNewGroup, setPingNewGroup] = useState({
     name: "",
     members: []
   });
-  const [pingOnline, setPingOnline] = (0, _react.useState)({});
-  const [pingLoading, setPingLoading] = (0, _react.useState)(false);
-  const [pingError, setPingError] = (0, _react.useState)("");
-  const [pingMenuOpen, setPingMenuOpen] = (0, _react.useState)(false);
-  const [pingDriveFiles, setPingDriveFiles] = (0, _react.useState)({});
-  const pingMsgRef = (0, _react.useRef)(null);
+  const [pingOnline, setPingOnline] = useState({});
+  const [pingLoading, setPingLoading] = useState(false);
+  const [pingError, setPingError] = useState("");
+  const [pingMenuOpen, setPingMenuOpen] = useState(false);
+  const [pingDriveFiles, setPingDriveFiles] = useState({});
+  const pingMsgRef = useRef(null);
   async function pingDeriveKey(password) {
     const enc = new TextEncoder();
     const raw = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
@@ -4399,7 +4398,7 @@ function PulseApp() {
     sessionStorage.setItem("pulse_ping_oauth", "1");
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   }
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     const hash = window.location.hash;
     if (hash.includes("access_token") && sessionStorage.getItem("pulse_ping_oauth")) {
       sessionStorage.removeItem("pulse_ping_oauth");
@@ -4440,7 +4439,7 @@ function PulseApp() {
       }
     }
   }, []);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (!fwUser || !fwToken) return;
     const user = {
       email: fwUser.email,
@@ -4472,8 +4471,8 @@ function PulseApp() {
       }
     }
   }, [fwUser == null ? void 0 : fwUser.email, fwToken]);
-  const pingLastNotifTs = (0, _react.useRef)(Date.now());
-  (0, _react.useEffect)(() => {
+  const pingLastNotifTs = useRef(Date.now());
+  useEffect(() => {
     if (!fwUser) return;
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/firebase-messaging-sw.js', {
@@ -4501,7 +4500,7 @@ function PulseApp() {
       }, 3000);
     }
   }, [fwUser == null ? void 0 : fwUser.email]);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (!pingMe) return;
     const checkNotifs = async () => {
       if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
@@ -4791,7 +4790,7 @@ function PulseApp() {
     sessionStorage.setItem("pulse_fw_oauth", "1");
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   }
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     const hash = window.location.hash;
     if (hash.includes("access_token") && sessionStorage.getItem("pulse_fw_oauth")) {
       sessionStorage.removeItem("pulse_fw_oauth");
@@ -4866,7 +4865,7 @@ function PulseApp() {
       }
     }
   }, []);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     var _fwWorkspace$fileIds19;
     if (fwWorkspace != null && (_fwWorkspace$fileIds19 = fwWorkspace.fileIds) != null && _fwWorkspace$fileIds19.members && fwToken) {
       fwReadFile(fwWorkspace.fileIds.members, fwToken).then(m => {
@@ -4878,7 +4877,7 @@ function PulseApp() {
       });
     }
   }, [fwWorkspace, fwToken]);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     var _fwWorkspace$fileIds20, _fwWorkspace$fileIds21, _fwWorkspace$fileIds22, _fwWorkspace$fileIds23, _fwWorkspace$fileIds24, _fwWorkspace$fileIds25, _fwWorkspace$fileIds26;
     if (fwWorkspace != null && (_fwWorkspace$fileIds20 = fwWorkspace.fileIds) != null && _fwWorkspace$fileIds20.periods && fwToken) {
       fwReadFile(fwWorkspace.fileIds.periods, fwToken).then(data => {
@@ -5449,7 +5448,7 @@ function PulseApp() {
       }
     } catch (e) {}
   }
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab !== "ping" || !pingMe) return;
     pingLoadUsers();
     pingLoadChats();
@@ -5460,31 +5459,31 @@ function PulseApp() {
     }, 30000);
     return () => clearInterval(interval);
   }, [mainTab, pingMe == null ? void 0 : pingMe.email]);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "ping" && pingMe && fwMembers.length > 0) {
       pingLoadUsers();
     }
   }, [fwMembers.length]);
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab !== "ping" || pingScreen !== "chat" || !pingActiveChat) return;
     const interval = setInterval(() => pingLoadMessages(pingActiveChat), 10000);
     return () => clearInterval(interval);
   }, [mainTab, pingScreen, pingActiveChat == null ? void 0 : pingActiveChat.id]);
-  const [calcTab, setCalcTab] = (0, _react.useState)("discount");
-  const [discOrigPrice, setDiscOrigPrice] = (0, _react.useState)("");
-  const [discPercent, setDiscPercent] = (0, _react.useState)("");
-  const [intPrincipal, setIntPrincipal] = (0, _react.useState)("");
-  const [intRate, setIntRate] = (0, _react.useState)("");
-  const [intYears, setIntYears] = (0, _react.useState)("");
-  const [intType, setIntType] = (0, _react.useState)("simple");
-  const [currAmount, setCurrAmount] = (0, _react.useState)("");
-  const [currDir, setCurrDir] = (0, _react.useState)("usdToInr");
-  const [currRate, setCurrRate] = (0, _react.useState)(null);
-  const [currRateLoading, setCurrRateLoading] = (0, _react.useState)(false);
-  const [unitCategory, setUnitCategory] = (0, _react.useState)("weight");
-  const [unitFrom, setUnitFrom] = (0, _react.useState)("");
-  const [unitFromUnit, setUnitFromUnit] = (0, _react.useState)("kg");
-  const [unitToUnit, setUnitToUnit] = (0, _react.useState)("lbs");
+  const [calcTab, setCalcTab] = useState("discount");
+  const [discOrigPrice, setDiscOrigPrice] = useState("");
+  const [discPercent, setDiscPercent] = useState("");
+  const [intPrincipal, setIntPrincipal] = useState("");
+  const [intRate, setIntRate] = useState("");
+  const [intYears, setIntYears] = useState("");
+  const [intType, setIntType] = useState("simple");
+  const [currAmount, setCurrAmount] = useState("");
+  const [currDir, setCurrDir] = useState("usdToInr");
+  const [currRate, setCurrRate] = useState(null);
+  const [currRateLoading, setCurrRateLoading] = useState(false);
+  const [unitCategory, setUnitCategory] = useState("weight");
+  const [unitFrom, setUnitFrom] = useState("");
+  const [unitFromUnit, setUnitFromUnit] = useState("kg");
+  const [unitToUnit, setUnitToUnit] = useState("lbs");
   async function fetchCurrRate() {
     setCurrRateLoading(true);
     try {
@@ -5497,7 +5496,7 @@ function PulseApp() {
     }
     setCurrRateLoading(false);
   }
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "calc" && calcTab === "currency" && !currRate) fetchCurrRate();
   }, [mainTab, calcTab]);
   const UNIT_CATS = {
@@ -5571,7 +5570,7 @@ function PulseApp() {
       maximumFractionDigits: 4
     });
   }
-  (0, _react.useEffect)(() => {
+  useEffect(() => {
     if (mainTab === "restaurants") {
       if (userCoords) {
         fetchNearby(userCoords.lat, userCoords.lng, restaurantCuisine);
@@ -19985,3 +19984,4 @@ function PulseApp() {
     onClose: () => setSelectedMovie(null)
   })));
 }
+var __PulseApp__ = PulseApp;
