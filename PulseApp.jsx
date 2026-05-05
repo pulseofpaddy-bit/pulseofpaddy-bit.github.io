@@ -1652,7 +1652,7 @@ export default function PulseApp() {
   const [editTodoDueDate, setEditTodoDueDate] = useState("");
   const [todoAssignee, setTodoAssignee] = useState("all");
   const TODO_PRIORITIES = [
-    { id:"high",   label:"🔍´ High",   color:"#FF3B5C" },
+    { id:"high",   label:"🔴 High",   color:"#FF3B5C" },
     { id:"medium", label:"🟡 Medium", color:"#FFB800" },
     { id:"low",    label:"🟢 Low",    color:"#00C864" },
   ];
@@ -1674,7 +1674,7 @@ export default function PulseApp() {
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowStr = tomorrow.toISOString().split("T")[0];
       todoItems.filter(t => !t.done && t.dueDate === tomorrowStr).forEach(t => {
-        new Notification("📹 Task due tomorrow!", {
+        new Notification("🔔 Task due tomorrow!", {
           body: `"${t.text}" is due for ${t.assignee||"Family"}`,
           icon: "/favicon.ico",
         });
