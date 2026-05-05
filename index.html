@@ -101,17 +101,32 @@
 
   <!-- Bootstrap: load pre-built PulseApp.js (no Babel needed at runtime) -->
   <script>
+    // Expose all React hooks as globals so new Function() body can access them
+    window.useState = React.useState;
+    window.useEffect = React.useEffect;
+    window.useRef = React.useRef;
+    window.useMemo = React.useMemo;
+    window.useCallback = React.useCallback;
+    window.useContext = React.useContext;
+    window.useReducer = React.useReducer;
+    window.useLayoutEffect = React.useLayoutEffect;
+    window.useId = React.useId;
+    window.createContext = React.createContext;
+    window.Fragment = React.Fragment;
+
     (async function() {
+      var errDiv = document.getElementById('root');
       try {
-        const response = await fetch('./PulseApp.js?v=' + Date.now());
+        var response = await fetch('./PulseApp.js?v=' + Date.now());
         if (!response.ok) throw new Error('HTTP ' + response.status + ' loading PulseApp.js');
-        const source = await response.text();
-        const fn = new Function('React', 'useState', 'useEffect', 'useRef', source + '\nreturn __PulseApp__;');
-        const PulseApp = fn(React, React.useState, React.useEffect, React.useRef);
-        const root = ReactDOM.createRoot(document.getElementById('root'));
+        var source = await response.text();
+        // Use indirect eval so the code runs in global scope and can access window.useState etc.
+        var wrapped = '(function(){'  + source + '\nreturn __PulseApp__;})();';
+        var PulseApp = (0, eval)(wrapped);
+        var root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(React.createElement(PulseApp));
       } catch(e) {
-        document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">ERROR: ' + e.message + '\n\n' + (e.stack||'') + '</pre>';
+        errDiv.innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">ERROR: ' + e.message + '\n\n' + (e.stack||'') + '</pre>';
         console.error('PulseApp load error:', e);
       }
     })();
