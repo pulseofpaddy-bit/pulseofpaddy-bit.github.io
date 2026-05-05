@@ -1137,6 +1137,9 @@ export default function PulseApp() {
     setSelectedMovie(null);
   }
 
+  // Helper: strip meta entries (no email) from members array before setting state
+  const fwCleanMembers = (arr) => (Array.isArray(arr) ? arr : []).filter(m => m && m.email && !m.__workspace_key);
+
   // ─── ADD / REMOVE FAMILY MEMBERS (Drive-backed) ────────────────────────────────────────
   async function addFamilyMember() {
     const name = newMemberInput.trim();
@@ -1149,7 +1152,7 @@ export default function PulseApp() {
       if (!alreadyIn) {
         const updated = [...current, { name, email: "", role: "member", joinedAt: Date.now() }];
         await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken);
-        setFwMembers(updated);
+        setFwMembers(fwCleanMembers(updated));
       }
     } else {
       // Offline fallback: add to local state only
@@ -1165,7 +1168,7 @@ export default function PulseApp() {
       const current = await fwReadFile(fwWorkspace.fileIds.members, fwToken);
       const updated = current.filter(m => m.name !== name);
       await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken);
-      setFwMembers(updated);
+      setFwMembers(fwCleanMembers(updated));
     } else {
       setFwMembers(prev => prev.filter(m => m.name !== name));
     }
@@ -3551,9 +3554,9 @@ export default function PulseApp() {
       if (!alreadyIn) {
         // Try to write to Drive, but don't fail if it doesn't work
         await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken).catch(() => {});
-        setFwMembers(updated);
+        setFwMembers(fwCleanMembers(updated));
         // Also save to localStorage as backup
-        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
+        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(fwCleanMembers(updated)));
       }
       // Write head email to Firebase member_lookup so Rani's phone can find the shared key
       if (fwUser?.email) {
@@ -3593,7 +3596,7 @@ export default function PulseApp() {
     const current = await fwReadFile(fwWorkspace.fileIds.members, fwToken);
     const updated = current.filter(m => m.email !== email);
     await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken);
-    setFwMembers(updated);
+    setFwMembers(fwCleanMembers(updated));
   }
 
   // Sign out of Family Workspace
@@ -3623,14 +3626,14 @@ export default function PulseApp() {
       if (!alreadyIn) {
         const updated = [...members, { name: fwUser.name, email: fwUser.email, gender: onboardingGender, role, joinedAt: Date.now(), photo: fwUser.photo }];
         await fwWriteFile(ws.fileIds.members, updated, fwToken);
-        setFwMembers(updated);
-        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
+        setFwMembers(fwCleanMembers(updated));
+        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(fwCleanMembers(updated)));
       } else {
         // Update role and gender
         const updated = members.map(m => m.email === fwUser.email ? { ...m, role, gender: onboardingGender || m.gender, name: fwUser.name, photo: fwUser.photo } : m);
         await fwWriteFile(ws.fileIds.members, updated, fwToken);
-        setFwMembers(updated);
-        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
+        setFwMembers(fwCleanMembers(updated));
+        localStorage.setItem("pulse_fw_members_cache", JSON.stringify(fwCleanMembers(updated)));
       }
       // Sync the shared Firebase key so all family members use the same path
       await fwSyncSharedKey(ws, fwToken, role);
