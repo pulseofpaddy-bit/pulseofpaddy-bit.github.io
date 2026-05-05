@@ -1667,6 +1667,21 @@ export default function PulseApp() {
     }
   }, [mainTab]);
 
+  // Safe cross-platform notification helper (Android requires ServiceWorker)
+  function showNotification(title, options = {}) {
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.ready.then(reg => reg.showNotification(title, options)).catch(() => {});
+      } else {
+        new Notification(title, options);
+      }
+    } catch(e) {
+      // Fallback silently if both methods fail
+      try { if (navigator.serviceWorker) { navigator.serviceWorker.ready.then(reg => reg.showNotification(title, options)).catch(() => {}); } } catch(_) {}
+    }
+  }
+
   // Check daily for upcoming due-date notifications
   useEffect(() => {
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
@@ -1674,7 +1689,7 @@ export default function PulseApp() {
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowStr = tomorrow.toISOString().split("T")[0];
       todoItems.filter(t => !t.done && t.dueDate === tomorrowStr).forEach(t => {
-        new Notification("🔔 Task due tomorrow!", {
+        showNotification("🔔 Task due tomorrow!", {
           body: `"${t.text}" is due for ${t.assignee||"Family"}`,
           icon: "/favicon.ico",
         });
@@ -3009,7 +3024,7 @@ export default function PulseApp() {
           .map(([k, v]) => ({ key: k, ...v }))
           .filter(n => n.ts > pingLastNotifTs.current);
         for (const n of entries) {
-          new Notification(`💬 ${n.fromName || 'Family member'}`, {
+          showNotification(`💬 ${n.fromName || 'Family member'}`, {
             body: n.preview ? `"${n.preview}"` : 'Sent you a message in PingMe',
             icon: '/icon-192.png',
             badge: '/icon-192.png',
