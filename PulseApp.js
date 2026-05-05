@@ -1,4 +1,4 @@
-import{useState,useEffect,useRef}from"react";// ─── CONFIG ────────────────────────────────────────
+// ─── CONFIG ────────────────────────────────────────
 // ─── Get a FREE TMDb API key at themoviedb Settings API ────────────────────────────────────────
 const TMDB_API_KEY="1c89ee56a61436b0a2c976785bb9f694";const TMDB_BASE="https://api.themoviedb.org/3";const TMDB_IMG="https://image.tmdb.org/t/p/w500";const COUNTRY_REGION={american:"US",indian:"IN",british:"GB",korean:"KR",french:"FR",japanese:"JP"};// Theaters fetched live via geolocation (fetchNearbyTheaters)
 // Static fallback used when geolocation is unavailable
