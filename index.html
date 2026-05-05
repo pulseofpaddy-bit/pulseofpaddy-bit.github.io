@@ -2,46 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <!-- viewport-fit=cover enables safe area insets on iPhone notch/Dynamic Island -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <title>Pulse App</title>
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
-  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
-
-  <!-- PWA Support -->
-  <link rel="manifest" href="/site.webmanifest" />
-
-  <!-- iOS PWA / Apple Touch Icons -->
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-  <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
-  <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
-
-  <!-- iOS PWA Meta Tags -->
+  <link rel="icon" type="image/x-icon" href="/assets/favicon-C2FWcF5Y.ico" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192-VWqAr5Zb.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/icon-512-BrhZfiqH.png" />
+  <link rel="manifest" href="/assets/site-D9wJDlGY.webmanifest" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon-6z8yGpa_.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Pulse" />
   <meta name="mobile-web-app-capable" content="yes" />
-
-  <!-- Theme color for browser chrome -->
   <meta name="theme-color" content="#1a0533" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-
-  <!-- Prevent phone number detection on iOS -->
   <meta name="format-detection" content="telephone=no" />
-
   <style>
-    /* Reset */
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
-    /* Full height including iOS safe areas */
-    html {
-      height: -webkit-fill-available;
-      height: 100%;
-    }
-
+    html { height: -webkit-fill-available; height: 100%; }
     body {
       width: 100%;
       min-height: 100vh;
@@ -52,7 +29,6 @@
       -webkit-text-size-adjust: 100%;
       text-size-adjust: 100%;
     }
-
     #root {
       width: 100%;
       min-height: 100vh;
@@ -61,74 +37,17 @@
       display: flex;
       flex-direction: column;
     }
-
-    /* Fix iOS input zoom — inputs must be at least 16px to prevent auto-zoom */
-    input, textarea, select {
-      font-size: 16px !important;
-      -webkit-appearance: none;
-      appearance: none;
-    }
-
-    /* Fix iOS date/time input appearance */
-    input[type="date"],
-    input[type="time"],
-    input[type="datetime-local"] {
-      -webkit-appearance: none;
-      appearance: none;
-      min-height: 44px;
-    }
-
-    /* Remove blue tap highlight on iOS */
+    input, textarea, select { font-size: 16px !important; -webkit-appearance: none; appearance: none; }
+    input[type="date"], input[type="time"], input[type="datetime-local"] { -webkit-appearance: none; appearance: none; min-height: 44px; }
     * { -webkit-tap-highlight-color: transparent; }
-
-    /* Smooth momentum scrolling for iOS */
     [style*="overflow"] { -webkit-overflow-scrolling: touch; }
-
-    /* Prevent callout on long press for images and links */
     img, a { -webkit-touch-callout: none; }
-
-    /* Hide scrollbars visually but keep scroll functionality */
     ::-webkit-scrollbar { display: none; }
     * { scrollbar-width: none; ms-overflow-style: none; }
   </style>
+  <script type="module" crossorigin src="/assets/index-B_EHpQoS.js"></script>
 </head>
 <body>
-  <div id="root"><div id="boot-status" style="color:#333;padding:30px;font-family:monospace;font-size:14px">⏳ Loading PulseApp...</div></div>
-
-  <!-- React 18 via CDN -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
-  <!-- Bootstrap: expose React hooks as globals, then load PulseApp.js as a native script tag -->
-  <script>
-    // Expose all React hooks as globals so PulseApp.js can access them
-    window.useState = React.useState;
-    window.useEffect = React.useEffect;
-    window.useRef = React.useRef;
-    window.useMemo = React.useMemo;
-    window.useCallback = React.useCallback;
-    window.useContext = React.useContext;
-    window.useReducer = React.useReducer;
-    window.useLayoutEffect = React.useLayoutEffect;
-    window.useId = React.useId;
-    window.createContext = React.createContext;
-    window.Fragment = React.Fragment;
-  </script>
-
-  <!-- Load pre-built PulseApp.js as a native script (no eval, no Babel) -->
-  <script src="./PulseApp.js?v=1778006894"></script>
-
-  <!-- Mount the app after PulseApp.js has loaded -->
-  <script>
-    (function() {
-      try {
-        if (typeof __PulseApp__ === 'undefined') throw new Error('__PulseApp__ not defined — PulseApp.js failed to load');
-        var root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(React.createElement(__PulseApp__));
-      } catch(e) {
-        document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">ERROR: ' + e.message + '\n\n' + (e.stack||'') + '</pre>';
-      }
-    })();
-  </script>
+  <div id="root"></div>
 </body>
 </html>
