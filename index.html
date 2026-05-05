@@ -99,23 +99,28 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
-  <!-- Load pre-built PulseApp.js (no Babel needed at runtime) -->
+  <!-- Bootstrap: mount PulseApp once the ES-module script has loaded -->
   <script>
-    (async function() {
-      const { useState, useEffect, useRef } = React;
+    window.__mountPulse__ = function(PulseApp) {
       try {
-        const response = await fetch('./PulseApp.js?v=' + Date.now());
-        if (!response.ok) throw new Error('Could not load PulseApp.js');
-        const source = await response.text();
-        const fn = new Function('React', 'useState', 'useEffect', 'useRef', source + '\nreturn __PulseApp__;');
-        const PulseApp = fn(React, useState, useEffect, useRef);
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(React.createElement(PulseApp));
       } catch(e) {
-        document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">ERROR: ' + e.message + '\n\n' + (e.stack||'') + '</pre>';
-        console.error(e);
+        document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">MOUNT ERROR: ' + e.message + '</pre>';
       }
-    })();
+    };
+  </script>
+
+  <!-- Load pre-built PulseApp.js as an ES module -->
+  <script type="module">
+    try {
+      const mod = await import('./PulseApp.js?v=' + Date.now());
+      const PulseApp = mod.default;
+      window.__mountPulse__(PulseApp);
+    } catch(e) {
+      document.getElementById('root').innerHTML = '<pre style="color:red;padding:20px;font-size:12px;white-space:pre-wrap">LOAD ERROR: ' + e.message + '\n\n' + (e.stack||'') + '</pre>';
+      console.error(e);
+    }
   </script>
 </body>
 </html>
