@@ -8,7 +8,7 @@ export default defineConfig({
     legacy({
       targets: ['android >= 60', 'chrome >= 60', 'ios >= 12'],
       renderLegacyChunks: true,
-      modernPolyfills: true,
+      modernPolyfills: false,
     }),
   ],
   base: '/',
