@@ -1682,25 +1682,53 @@ export default function PulseApp() {
     }
   }
 
-  // Check daily for upcoming due-date notifications
+  // Check daily for upcoming due-date notifications — only once per task per day
   useEffect(() => {
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     function checkDueDateNotifs() {
+      const today = new Date().toISOString().split("T")[0]; // e.g. "2026-05-05"
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowStr = tomorrow.toISOString().split("T")[0];
+      // Load the set of task IDs already notified today
+      let notifiedToday = {};
+      try { notifiedToday = JSON.parse(localStorage.getItem("pulse_notif_sent") || "{}"); } catch {}
+      // Clear stale entries from previous days
+      if (notifiedToday._date !== today) notifiedToday = { _date: today };
+      let changed = false;
       todoItems.filter(t => !t.done && t.dueDate === tomorrowStr).forEach(t => {
+        const key = t.id || t.text;
+        if (notifiedToday[key]) return; // already fired today
         showNotification("🔔 Task due tomorrow!", {
           body: `"${t.text}" is due for ${t.assignee||"Family"}`,
           icon: "/favicon.ico",
+          tag: `todo-due-${key}`, // prevents duplicate system-level banners
         });
+        notifiedToday[key] = true;
+        changed = true;
       });
+      if (changed) localStorage.setItem("pulse_notif_sent", JSON.stringify(notifiedToday));
     }
-    checkDueDateNotifs();
+    // Only run once per app session (not on every todoItems change)
+    const alreadyCheckedKey = "pulse_notif_checked_" + new Date().toISOString().split("T")[0];
+    if (!sessionStorage.getItem(alreadyCheckedKey)) {
+      sessionStorage.setItem(alreadyCheckedKey, "1");
+      checkDueDateNotifs();
+    }
   }, [todoItems]);
 
   useEffect(() => {
     if (mainTab === "todo") loadTodos();
   }, [mainTab]);
+
+  // Sync todo items to service worker so it can fire due-date reminders when app is closed
+  useEffect(() => {
+    if (!todoItems.length) return;
+    try {
+      if (navigator.serviceWorker?.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'SET_TODO_ITEMS', items: todoItems });
+      }
+    } catch(e) {}
+  }, [todoItems]);
 
   async function loadTodos() {
     setTodoLoading(true);
@@ -2988,14 +3016,21 @@ export default function PulseApp() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
         .then(reg => {
+          // Helper to send messages to the active SW
+          function swPost(msg) {
+            const target = reg.active || reg.installing || reg.waiting;
+            if (target) target.postMessage(msg);
+          }
           // Tell service worker the user's email for background polling
-          if (reg.active) reg.active.postMessage({ type: 'SET_USER_EMAIL', email: fwUser.email });
-          else if (reg.installing) reg.installing.addEventListener('statechange', () => {
-            if (reg.active) reg.active.postMessage({ type: 'SET_USER_EMAIL', email: fwUser.email });
-          });
-          // Register periodic sync if supported (Android Chrome)
+          swPost({ type: 'SET_USER_EMAIL', email: fwUser.email });
+          // Also send current todo items so SW can check due dates when app is closed
+          try {
+            const stored = localStorage.getItem('pulse_todo_items');
+            if (stored) swPost({ type: 'SET_TODO_ITEMS', items: JSON.parse(stored) });
+          } catch(e) {}
+          // Register periodic background sync (Android Chrome PWA)
           if ('periodicSync' in reg) {
-            reg.periodicSync.register('pingme-check', { minInterval: 15 * 60 * 1000 }).catch(()=>{});
+            reg.periodicSync.register('pulse-background-check', { minInterval: 15 * 60 * 1000 }).catch(()=>{});
           }
         }).catch(()=>{});
     }
