@@ -1,3 +1,4 @@
+(function(){
 
 const TMDB_API_KEY = "1c89ee56a61436b0a2c976785bb9f694";
 const TMDB_BASE = "https://api.themoviedb.org/3";
@@ -19984,4 +19985,5 @@ function PulseApp() {
     onClose: () => setSelectedMovie(null)
   })));
 }
-var __PulseApp__ = PulseApp;
+window.__PulseApp__ = PulseApp;
+})();
