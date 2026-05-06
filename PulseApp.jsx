@@ -1479,10 +1479,22 @@ export default function PulseApp() {
   }
 
   async function toggleApptDone(id, done) {
-    setApptItems(prev => { const updated = prev.map(i => i.id === id ? { ...i, done: !done } : i); localStorage.setItem("pulse_appointments", JSON.stringify(updated)); return updated; });
+    // Optimistic local update first
+    setApptItems(prev => {
+      const updated = prev.map(i => i.id === id ? { ...i, done: !done } : i);
+      localStorage.setItem("pulse_appointments", JSON.stringify(updated));
+      return updated;
+    });
+    // Persist to Drive using localStorage snapshot (avoids stale re-read race condition)
     if (fwWorkspace?.fileIds?.appointments && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.appointments, fwToken);
-      await fwWriteFile(fwWorkspace.fileIds.appointments, (Array.isArray(current) ? current : []).map(i => i.id === id ? { ...i, done: !done } : i), fwToken);
+      try {
+        await new Promise(r => setTimeout(r, 60)); // let setState flush
+        const toSave = JSON.parse(localStorage.getItem("pulse_appointments") || "[]");
+        await fwWriteFile(fwWorkspace.fileIds.appointments, toSave, fwToken);
+        console.log("[Appt] Done status saved to Drive, id:", id, "done:", !done);
+      } catch(e) {
+        console.error("[Appt] Drive write failed:", e);
+      }
     }
   }
 
@@ -2080,70 +2092,100 @@ export default function PulseApp() {
     return null; // unrecognised — skip
   }
 
+  function parseDate(str) {
+    if (!str) return "";
+    let ds = str.trim();
+    // Remove leading day-of-week like "Thu, " or "Thu "
+    ds = ds.replace(/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*/i, "");
+    if (!/\d{4}/.test(ds)) ds += " " + new Date().getFullYear();
+    const d = new Date(ds);
+    return isNaN(d) ? "" : d.toISOString().split("T")[0];
+  }
   function extractResvFields(subject, body, type) {
-    const lines = body.split(/\n|\r/).map(l => l.trim()).filter(Boolean);
-    // Confirmation number — also match standalone numbers like "34789903"
+    // ── Confirmation number ──────────────────────────────────────────
+    // Must NOT match words like FORWARDING, CONFIRMED, RESERVATION itself
     let confirmNo = "";
-    const confMatch = body.match(/(?:confirmation|booking|reservation|record|pnr|reference)\s*(?:number|code|#|no\.?)?\s*[:\-]?\s*([A-Z0-9]{4,12})/i)
-                   || body.match(/#\s*([A-Z0-9]{6,12})/i);
-    if (confMatch) confirmNo = confMatch[1].toUpperCase();
-    // Date — hotel check-in first, then generic patterns
+    const confMatch = body.match(/(?:confirmation|booking|reservation|record|pnr|reference)\s*(?:number|code|#|no\.?|id)?\s*[:\-#]?\s*([A-Z0-9]{5,12})(?!\w)/i);
+    if (confMatch) {
+      const candidate = confMatch[1].toUpperCase();
+      // Exclude common false positives
+      if (!/^(FORWARDING|CONFIRMED|RESERVATION|BOOKING|NUMBER|HOTEL|FLIGHT|EVENT)$/.test(candidate)) {
+        confirmNo = candidate;
+      }
+    }
+    // Also try standalone 6-10 digit numbers after # symbol
+    if (!confirmNo) {
+      const numMatch = body.match(/#\s*(\d{6,10})(?!\d)/);
+      if (numMatch) confirmNo = numMatch[1];
+    }
+
+    // ── Check-in date ────────────────────────────────────────────────
     let date = "";
+    // Pattern 1: "Check-in starts at 3:00 PM\nThu, May 7" (Radisson style — next line after check-in)
+    const checkinBlockMatch = body.match(/check.?in[^\n]*\n[^\n]*\n?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+    if (checkinBlockMatch) date = parseDate(checkinBlockMatch[1]);
+    // Pattern 2: inline "Check-in: Thu, May 7"
+    if (!date) {
+      const m = body.match(/(?:check.?in|arrival)\s*[:\-]?\s*(?:starts?\s*(?:at\s*[\d:apm]+)?\s*)?(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+      if (m) date = parseDate(m[1]);
+    }
+    // Pattern 3: "Thu, May 7 - Sat, May 9" range
+    if (!date) {
+      const m = body.match(/(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)\s*[-–]\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i);
+      if (m) date = parseDate(m[1]);
+    }
+    // Pattern 4: ISO date
+    if (!date) {
+      const m = body.match(/(\d{4}-\d{2}-\d{2})/);
+      if (m) date = m[1];
+    }
+    // Pattern 5: generic date keyword
+    if (!date) {
+      const m = body.match(/(?:event|date|departure)\s*[:\-]?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+      if (m) date = parseDate(m[1]);
+    }
+
+    // ── Check-out date ───────────────────────────────────────────────
     let checkOut = "";
-    const datePatterns = [
-      // "Thu, May 7" or "Thu May 7, 2026" style
-      /(?:check.?in|arrival|departure|event|date)\s*[:\-]?\s*(?:starts?\s*(?:at\s*[\d:apm]+)?)?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i,
-      /(?:check.?in|arrival|departure|event|date)\s*[:\-]?\s*(\w+ \d{1,2},?\s*\d{4})/i,
-      /(?:check.?in|arrival|departure|event|date)\s*[:\-]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-      /(\d{4}-\d{2}-\d{2})/,
-    ];
-    for (const p of datePatterns) {
-      const m = body.match(p);
-      if (m) {
-        // Append current year if missing
-        let ds = m[1].trim();
-        if (!/\d{4}/.test(ds)) ds += " " + new Date().getFullYear();
-        const d = new Date(ds);
-        if (!isNaN(d)) { date = d.toISOString().split("T")[0]; break; }
-      }
+    // Pattern 1: "Check-out before 11:00 AM\nSat, May 9" (Radisson style)
+    const checkoutBlockMatch = body.match(/check.?out[^\n]*\n[^\n]*\n?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+    if (checkoutBlockMatch) checkOut = parseDate(checkoutBlockMatch[1]);
+    // Pattern 2: inline check-out
+    if (!checkOut) {
+      const m = body.match(/(?:check.?out|departure)\s*[:\-]?\s*(?:before\s*[\d:apm]+\s*)?(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+      if (m) checkOut = parseDate(m[1]);
     }
-    // Check-out date for hotels
-    const coPatterns = [
-      /(?:check.?out|departure)\s*[:\-]?\s*(?:before\s*[\d:apm]+)?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i,
-      /(?:check.?out|departure)\s*[:\-]?\s*(\w+ \d{1,2},?\s*\d{4})/i,
-    ];
-    for (const p of coPatterns) {
-      const m = body.match(p);
-      if (m) {
-        let ds = m[1].trim();
-        if (!/\d{4}/.test(ds)) ds += " " + new Date().getFullYear();
-        const d = new Date(ds);
-        if (!isNaN(d)) { checkOut = d.toISOString().split("T")[0]; break; }
-      }
+    // Pattern 3: date range second date
+    if (!checkOut) {
+      const m = body.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?\s*[-–]\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+      if (m) checkOut = parseDate(m[1]);
     }
-    // Name / property — try to extract hotel/venue name from body first
-    let name = subject.replace(/^(Fwd:|Re:|Fw:)\s*/i,"").replace(/\s+/g," ").trim().slice(0,80);
+
+    // ── Hotel / venue name ───────────────────────────────────────────
+    let name = subject.replace(/^(Fwd:|Re:|Fw:|Notification:)\s*/i,"").replace(/\s+/g," ").trim().slice(0,80);
     if (type === "🏨 Hotel") {
-      // Try to extract hotel name from body: look for lines with hotel/inn/suites/resort keywords
-      const hotelNameMatch = body.match(/^([A-Z][^\n]{5,60}(?:Inn|Hotel|Suites?|Resort|Lodge|Motel|Radisson|Marriott|Hilton|Hyatt|Sheraton|Wyndham|Holiday|Hampton|Courtyard|Comfort|Best Western)[^\n]{0,40})/im)
-                          || body.match(/(?:property|hotel|stay at|reservation at)[:\s]+([^\n]{5,80})/i);
-      if (hotelNameMatch) name = hotelNameMatch[1].trim().slice(0, 80);
+      // Look for a line that IS the hotel name (starts with capital, contains hotel keyword)
+      const hotelLine = body.match(/^([A-Z][^\n]{5,70}(?:Inn|Hotel|Suites?|Resort|Lodge|Motel|Radisson|Marriott|Hilton|Hyatt|Sheraton|Wyndham|Holiday Inn|Hampton|Courtyard|Comfort|Best Western|Country Inn)[^\n]{0,50})$/im)
+                     || body.match(/(?:property|hotel|stay at|your stay at|reservation at|staying at)[:\s]+([^\n]{5,80})/i);
+      if (hotelLine) name = hotelLine[1].trim().replace(/,\s*[A-Z][a-z]+.*$/, "").trim().slice(0, 80);
     }
-    // Address — look for street address pattern (number + street)
+
+    // ── Address ──────────────────────────────────────────────────────
     let address = "";
     const addrMatch = body.match(/(\d{2,5}\s+[A-Za-z][^\n,]{5,60}(?:,\s*[A-Za-z][^\n]{3,40}){1,3})/)
-                   || body.match(/(?:address|location|property|hotel|venue)\s*[:\-]?\s*([^\n]{10,80})/i);
-    if (addrMatch) address = addrMatch[1].trim().slice(0,100);
-    // Notes
+                   || body.match(/(?:address|location)\s*[:\-]?\s*([^\n]{10,100})/i);
+    if (addrMatch) address = addrMatch[1].trim().slice(0, 120);
+
+    // ── Notes ────────────────────────────────────────────────────────
     let notes = "";
     if (type === "✈️ Flight") {
-      const routeMatch = body.match(/([A-Z]{3})\s*(?:→|->|to|→)\s*([A-Z]{3})/i);
+      const routeMatch = body.match(/([A-Z]{3})\s*(?:→|->|to)\s*([A-Z]{3})/i);
       if (routeMatch) notes = `${routeMatch[1].toUpperCase()} → ${routeMatch[2].toUpperCase()}`;
     }
     if (type === "🏨 Hotel" && checkOut) {
       notes = `Check-out: ${checkOut}`;
     }
-    return { name, date, confirmNo, address, notes };
+    return { name, date, confirmNo, address, notes, checkOut };
   }
 
   async function syncAccountReservations(account, currentResvItems) {
@@ -2153,6 +2195,8 @@ export default function PulseApp() {
     let imported = 0;
     // Track processed message IDs across all queries to prevent cross-query duplicates
     const processedMsgIds = new Set((currentResvItems || []).map(r => r.googleId).filter(Boolean));
+    // Also track confirmation numbers to prevent saving duplicate bookings (same booking, different email)
+    const processedConfirmNos = new Set((currentResvItems || []).filter(r => r.confirmNo && r.confirmNo.length >= 5).map(r => `${r.type}|${r.confirmNo}`));
 
     // Gmail search queries — using simple subject: syntax that Gmail API reliably supports
     const QUERIES = [
@@ -2218,16 +2262,22 @@ export default function PulseApp() {
             console.log(`[RESV] Subject: "${subject.slice(0,60)}" → type: ${type||"SKIP"}`);
             if (!type) continue;
 
-            const { name, date, confirmNo, address, notes } = extractResvFields(subject, body, type);
+            const { name, date, confirmNo, address, notes, checkOut } = extractResvFields(subject, body, type);
             // Use email date as fallback only for non-hotel types (hotels must have a check-in date)
             const fallbackDate = dateHdr ? new Date(dateHdr).toISOString().split("T")[0] : "";
             const finalDate = date || (type !== "🏨 Hotel" ? fallbackDate : "");
             console.log(`[RESV] date=${date} fallback=${fallbackDate} final=${finalDate} confirmNo=${confirmNo}`);
             if (!finalDate) { console.warn(`[RESV] Skipping - no date found for: ${subject.slice(0,60)}`); continue; }
+            // Skip if we already have this booking by confirmation number
+            if (confirmNo && confirmNo.length >= 5) {
+              const confKey = `${type}|${confirmNo}`;
+              if (processedConfirmNos.has(confKey)) { console.log(`[RESV] Skipping duplicate confirmNo ${confirmNo}`); continue; }
+              processedConfirmNos.add(confKey);
+            }
 
             const item = {
               type, name, date: finalDate, time:"", partySize:"",
-              confirmNo, address, notes,
+              confirmNo, address, notes, checkOut: checkOut || "",
               assignedTo: email,
               past: new Date(finalDate + "T23:59:59") < new Date(),
               source: "gmail", sourceEmail: email, googleId, createdAt: Date.now(),
@@ -2326,9 +2376,12 @@ export default function PulseApp() {
           try { await fetch(`${RESV_URL}/${encodeURIComponent(bad.id)}.json`, { method:"DELETE" }); } catch(e) {}
         }
         const validItems = allItems.filter(i => i.name && validTypes.includes(i.type));
-        // Deduplicate by googleId — keep only the first occurrence, delete extras from Firebase
+        // Deduplicate by googleId AND by confirmNo (same booking from 2 different emails)
         const seenGoogleIds = new Set();
+        const seenConfirmNos = new Set();
         const items = [];
+        // Sort by createdAt so we keep the oldest (most authoritative) entry
+        validItems.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
         for (const item of validItems) {
           if (item.googleId) {
             if (seenGoogleIds.has(item.googleId)) {
@@ -2336,6 +2389,15 @@ export default function PulseApp() {
               continue;
             }
             seenGoogleIds.add(item.googleId);
+          }
+          // Also deduplicate by confirmation number (catches forwarded/notification emails)
+          if (item.confirmNo && item.confirmNo.length >= 5) {
+            const key = `${item.type}|${item.confirmNo}`;
+            if (seenConfirmNos.has(key)) {
+              try { await fetch(`${RESV_URL}/${encodeURIComponent(item.id)}.json`, { method:"DELETE" }); } catch(e) {}
+              continue;
+            }
+            seenConfirmNos.add(key);
           }
           items.push(item);
         }
@@ -6027,15 +6089,16 @@ export default function PulseApp() {
                               </div>
                               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}>
                                 <span style={{fontSize:10,fontWeight:700,color:rt.color,background:`${rt.color}18`,padding:"2px 8px",borderRadius:20}}>{rt.emoji} {rt.label}</span>
-                                {r.date && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>📅 {new Date(r.date+"T12:00:00").toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"})}</span>}
-                                {r.time && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🕐 {r.time}</span>}
+                                {r.date && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🛬 Check-in: {new Date(r.date+"T12:00:00").toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"})}</span>}
+                                {(r.checkOut || (r.notes && r.notes.startsWith("Check-out:"))) && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🛫 Check-out: {(() => { const co = r.checkOut || (r.notes||"").replace("Check-out:","").trim(); try { return new Date(co+"T12:00:00").toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"}); } catch { return co; } })()}</span>}
+                                {r.time && !r.checkOut && !r.notes?.startsWith("Check-out:") && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🕐 {r.time}</span>}
                                 {r.partySize && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>👥 {r.partySize} guests</span>}
                               </div>
-                              {r.address && <a href={`https://maps.google.com/?q=${encodeURIComponent(r.address)}`} target="_blank" rel="noopener noreferrer" style={{textDecoration:"none"}}><div style={{fontSize:11,color:rt.color,marginBottom:3}}>📍 {r.address}</div></a>}
+                              {r.address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}`} target="_blank" rel="noopener noreferrer" style={{textDecoration:"none"}}><div style={{fontSize:11,color:rt.color,marginBottom:3}}>📍 {r.address} <span style={{fontSize:9,opacity:0.7}}>↗ Maps</span></div></a>}
                               {r.confirmNo && <div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>🎫 Confirmation: <strong style={{color:T.text}}>{r.confirmNo}</strong></div>}
-                              {r.notes && <div style={{fontSize:11,color:T.textFaint,fontStyle:"italic"}}>{r.notes}</div>}
+                              {r.notes && !r.notes.startsWith("Check-out:") && <div style={{fontSize:11,color:T.textFaint,fontStyle:"italic"}}>{r.notes}</div>}
                               {r.source === "gcal" && <div style={{fontSize:9,fontWeight:700,color:"#10B981",marginTop:4,display:"flex",alignItems:"center",gap:4}}><span style={{background:"rgba(16,185,129,0.15)",borderRadius:6,padding:"1px 5px"}}>📅 Google Calendar</span><span style={{color:T.textFaint}}>{r.sourceEmail||""}</span></div>}
-                              {r.source === "gmail" && <div style={{fontSize:9,fontWeight:700,color:"#6366F1",marginTop:4,display:"flex",alignItems:"center",gap:4}}><span style={{background:"rgba(99,102,241,0.15)",borderRadius:6,padding:"1px 5px"}}>📍§ Auto-imported from Gmail</span><span style={{color:T.textFaint}}>{r.sourceEmail||""}</span></div>}
+                              {r.source === "gmail" && <div style={{fontSize:9,fontWeight:700,color:"#6366F1",marginTop:4,display:"flex",alignItems:"center",gap:4}}><span style={{background:"rgba(99,102,241,0.15)",borderRadius:6,padding:"1px 5px"}}>📧 Gmail</span><span style={{color:T.textFaint}}>{r.sourceEmail||""}</span></div>}
                             </div>
                           </div>
                           <div onClick={()=>markResvPast(r.id, r.past)} style={{marginTop:10,background:isDark?`${rt.color}12`:`${rt.color}10`,border:`1px solid ${rt.color}30`,borderRadius:10,padding:"7px",textAlign:"center",cursor:"pointer",fontSize:11,fontWeight:700,color:rt.color}}>
