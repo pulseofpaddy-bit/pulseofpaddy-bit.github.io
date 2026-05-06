@@ -1775,19 +1775,38 @@ export default function PulseApp() {
       const res = await fetch(`${fbUrl}.json`);
       if (!res.ok) { setTodoLoading(false); return; }
       const data = await res.json();
-      if (data && typeof data === "object") {
-        const fbItems = Object.entries(data)
-          .map(([fbId, val]) => ({ fbId, ...val }))
-          .filter(i => i.text && i.text.trim())
-          .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
-        setTodoItems(prev => {
-          // Keep any local-only items not yet in Firebase
-          const localOnly = prev.filter(i => !i.fbId && !fbItems.some(f => f.id === i.id));
-          const merged = [...fbItems, ...localOnly].sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
-          localStorage.setItem("pulse_todo_items", JSON.stringify(merged));
-          return merged;
-        });
+      // data === null means Firebase path is empty
+      const fbItems = (data && typeof data === "object")
+        ? Object.entries(data)
+            .map(([fbId, val]) => ({ fbId, ...val }))
+            .filter(i => i.text && i.text.trim())
+            .sort((a,b) => (b.createdAt||0) - (a.createdAt||0))
+        : [];
+
+      // Migrate any local tasks that have no fbId yet — push them to Firebase so all family members see them
+      const localItems = JSON.parse(localStorage.getItem("pulse_todo_items") || "[]");
+      const unsynced = localItems.filter(i => !i.fbId && i.text && !fbItems.some(f => f.id === i.id));
+      if (unsynced.length > 0) {
+        todoWritePending.current = true;
+        const migrated = await Promise.all(unsynced.map(async item => {
+          try {
+            const r = await fetch(`${fbUrl}.json`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(item) });
+            const d = await r.json();
+            return d?.name ? { ...item, fbId: d.name } : item;
+          } catch(e) { return item; }
+        }));
+        // Merge migrated items (now with fbId) into fbItems
+        migrated.forEach(m => { if (m.fbId && !fbItems.some(f => f.id === m.id)) fbItems.push(m); });
+        todoWritePending.current = false;
       }
+
+      setTodoItems(prev => {
+        // Keep any local-only items not yet in Firebase (e.g. added while offline)
+        const localOnly = prev.filter(i => !i.fbId && !fbItems.some(f => f.id === i.id));
+        const merged = [...fbItems, ...localOnly].sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+        localStorage.setItem("pulse_todo_items", JSON.stringify(merged));
+        return merged;
+      });
     } catch(e) { /* keep cached data on error */ }
     setTodoLoading(false);
   }
