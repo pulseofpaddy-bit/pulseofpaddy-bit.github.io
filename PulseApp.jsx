@@ -2170,10 +2170,17 @@ export default function PulseApp() {
         );
         if (!listRes.ok) {
           const errText = await listRes.text().catch(()=>"");
-          console.warn(`[RESV] Query ${hint} failed: HTTP ${listRes.status}`, errText.slice(0,200));
+          console.warn(`[RESV] Query ${hint} failed: HTTP ${listRes.status}`, errText.slice(0,400));
           if (listRes.status === 401 || listRes.status === 403) {
+            // Parse the error reason from Google API response
+            let errReason = listRes.status === 401 ? "Token expired" : "Access denied";
+            try {
+              const errJson = JSON.parse(errText);
+              const reason = errJson?.error?.errors?.[0]?.reason || errJson?.error?.message || "";
+              if (reason) errReason = reason;
+            } catch(e) {}
             saveGAccounts(gAccounts.map(a => a.email === email ? { ...a, expired: true } : a));
-            setGSyncMsg(prev => ({ ...prev, [email]: `⚠️ Session expired (${listRes.status}) — log out & back in` }));
+            setGSyncMsg(prev => ({ ...prev, [email]: `⚠️ Gmail error (${listRes.status}): ${errReason}` }));
             setGSyncing(prev => ({ ...prev, [email]: false }));
             return; // stop all queries for this account
           }
