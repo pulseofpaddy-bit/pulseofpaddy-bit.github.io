@@ -566,7 +566,17 @@ export default function PulseApp() {
 
   // ─── FAMILY WORKSPACE AUTH STATE ────────────────────────────────────────
   const [fwUser, setFwUser]               = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_fw_user")||"null"); } catch { return null; } });
-  const [fwToken, setFwToken]             = useState(() => localStorage.getItem("pulse_fw_token")||null);
+  const [fwToken, setFwToken]             = useState(() => {
+    const token = localStorage.getItem("pulse_fw_token");
+    const expiry = parseInt(localStorage.getItem("pulse_fw_token_exp") || "0", 10);
+    // Clear token if it's expired (with 5-min buffer)
+    if (token && expiry && Date.now() > expiry - 300000) {
+      localStorage.removeItem("pulse_fw_token");
+      localStorage.removeItem("pulse_fw_token_exp");
+      return null;
+    }
+    return token || null;
+  });
   const [fwRole, setFwRole]               = useState(() => localStorage.getItem("pulse_fw_role")||null); // "head" | "member"
   const [fwWorkspace, setFwWorkspace]     = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_fw_workspace")||"null"); } catch { return null; } }); // { folderId, fileIds:{grocery,todos,appointments,members} }
   const [fwMembers, setFwMembers]         = useState(() => { try { const c = localStorage.getItem('pulse_fw_members_cache'); return c ? JSON.parse(c) : []; } catch { return []; } });  // [{ name, email, role, joinedAt }]
@@ -1360,10 +1370,17 @@ export default function PulseApp() {
     try {
       if (fwWorkspace?.fileIds?.appointments && fwToken) {
         const items = await fwReadFile(fwWorkspace.fileIds.appointments, fwToken);
-        if (Array.isArray(items) && items.length > 0) {
-          const sorted = items.sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time));
-          setApptItems(sorted);
-          localStorage.setItem("pulse_appointments", JSON.stringify(sorted));
+        if (items === null) {
+          // Token expired — show warning but keep localStorage data
+          setApptSyncMsg("⚠️ Session expired — tap Sync or log out & back in");
+          setTimeout(() => setApptSyncMsg(""), 6000);
+        } else if (Array.isArray(items)) {
+          if (items.length > 0) {
+            const sorted = items.sort((a,b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time));
+            setApptItems(sorted);
+            localStorage.setItem("pulse_appointments", JSON.stringify(sorted));
+          }
+          // items.length === 0 means Drive file is empty — keep localStorage cache
         }
       }
     } catch(e) { /* keep localStorage data */ }
@@ -1493,9 +1510,19 @@ export default function PulseApp() {
     let imported = 0;
 
     const QUERIES = [
-      'subject:("appointment" OR "doctor" OR "dental" OR "dentist" OR "clinic" OR "hospital" OR "lab results" OR "check-up" OR "checkup" OR "physical" OR "vaccination" OR "immunization") newer_than:365d',
-      'subject:("Dr." OR "physician" OR "pediatric" OR "gynecolog" OR "eye exam" OR "optometr" OR "prescription" OR "pharmacy" OR "specialist" OR "referral" OR "surgery") newer_than:365d',
-      'subject:("patient portal" OR "medical" OR "health" OR "test results" OR "blood work" OR "annual exam") newer_than:365d',
+      // Simple subject: queries that Gmail API reliably supports
+      'subject:appointment newer_than:365d',
+      'subject:doctor newer_than:365d',
+      'subject:dental newer_than:365d',
+      'subject:dentist newer_than:365d',
+      'subject:clinic newer_than:365d',
+      'subject:"lab results" newer_than:365d',
+      'subject:"check-up" newer_than:365d',
+      'subject:vaccination newer_than:365d',
+      'subject:"eye exam" newer_than:365d',
+      'subject:prescription newer_than:365d',
+      'subject:"test results" newer_than:365d',
+      'subject:"blood work" newer_than:365d',
     ];
 
     try {
@@ -3357,9 +3384,12 @@ export default function PulseApp() {
       sessionStorage.removeItem("pulse_fw_oauth");
       const params = new URLSearchParams(hash.replace("#","?"));
       const token  = params.get("access_token");
+      const expiresIn = parseInt(params.get("expires_in") || "3600", 10);
       if (token) {
         setFwToken(token);
         localStorage.setItem("pulse_fw_token", token);
+        // Store expiry time so we can detect stale tokens
+        localStorage.setItem("pulse_fw_token_exp", String(Date.now() + expiresIn * 1000));
         window.history.replaceState({}, "", window.location.pathname);
         // Fetch Google profile
         fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
