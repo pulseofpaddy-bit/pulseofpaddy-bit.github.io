@@ -2121,8 +2121,14 @@ export default function PulseApp() {
         if (!isNaN(d)) { checkOut = d.toISOString().split("T")[0]; break; }
       }
     }
-    // Name / property
+    // Name / property — try to extract hotel/venue name from body first
     let name = subject.replace(/^(Fwd:|Re:|Fw:)\s*/i,"").replace(/\s+/g," ").trim().slice(0,80);
+    if (type === "🏨 Hotel") {
+      // Try to extract hotel name from body: look for lines with hotel/inn/suites/resort keywords
+      const hotelNameMatch = body.match(/^([A-Z][^\n]{5,60}(?:Inn|Hotel|Suites?|Resort|Lodge|Motel|Radisson|Marriott|Hilton|Hyatt|Sheraton|Wyndham|Holiday|Hampton|Courtyard|Comfort|Best Western)[^\n]{0,40})/im)
+                          || body.match(/(?:property|hotel|stay at|reservation at)[:\s]+([^\n]{5,80})/i);
+      if (hotelNameMatch) name = hotelNameMatch[1].trim().slice(0, 80);
+    }
     // Address — look for street address pattern (number + street)
     let address = "";
     const addrMatch = body.match(/(\d{2,5}\s+[A-Za-z][^\n,]{5,60}(?:,\s*[A-Za-z][^\n]{3,40}){1,3})/)
@@ -2145,6 +2151,8 @@ export default function PulseApp() {
     setGSyncing(prev => ({ ...prev, [email]: true }));
     setGSyncMsg(prev => ({ ...prev, [email]: "Scanning Gmail for bookings…" }));
     let imported = 0;
+    // Track processed message IDs across all queries to prevent cross-query duplicates
+    const processedMsgIds = new Set((currentResvItems || []).map(r => r.googleId).filter(Boolean));
 
     // Gmail search queries — using simple subject: syntax that Gmail API reliably supports
     const QUERIES = [
@@ -2191,7 +2199,8 @@ export default function PulseApp() {
         for (const msg of (listData.messages || []).slice(0, 10)) {
           try {
             const googleId = `gmail_resv_${email}_${msg.id}`;
-            if ((currentResvItems || []).some(r => r.googleId === googleId)) { console.log(`[RESV] Skipping already-imported ${msg.id}`); continue; }
+            if (processedMsgIds.has(googleId)) { console.log(`[RESV] Skipping already-processed ${msg.id}`); continue; }
+            processedMsgIds.add(googleId); // Mark as processed immediately to prevent cross-query duplicates
 
             const msgRes = await fetch(
               `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
@@ -2210,9 +2219,9 @@ export default function PulseApp() {
             if (!type) continue;
 
             const { name, date, confirmNo, address, notes } = extractResvFields(subject, body, type);
-            // Use email date as fallback if no date extracted
+            // Use email date as fallback only for non-hotel types (hotels must have a check-in date)
             const fallbackDate = dateHdr ? new Date(dateHdr).toISOString().split("T")[0] : "";
-            const finalDate = date || fallbackDate;
+            const finalDate = date || (type !== "🏨 Hotel" ? fallbackDate : "");
             console.log(`[RESV] date=${date} fallback=${fallbackDate} final=${finalDate} confirmNo=${confirmNo}`);
             if (!finalDate) { console.warn(`[RESV] Skipping - no date found for: ${subject.slice(0,60)}`); continue; }
 
@@ -2220,7 +2229,7 @@ export default function PulseApp() {
               type, name, date: finalDate, time:"", partySize:"",
               confirmNo, address, notes,
               assignedTo: email,
-              past: new Date(finalDate) < new Date(),
+              past: new Date(finalDate + "T23:59:59") < new Date(),
               source: "gmail", sourceEmail: email, googleId, createdAt: Date.now(),
             };
 
@@ -2316,7 +2325,22 @@ export default function PulseApp() {
         for (const bad of invalid) {
           try { await fetch(`${RESV_URL}/${encodeURIComponent(bad.id)}.json`, { method:"DELETE" }); } catch(e) {}
         }
-        const items = allItems.filter(i => i.name && validTypes.includes(i.type));
+        const validItems = allItems.filter(i => i.name && validTypes.includes(i.type));
+        // Deduplicate by googleId — keep only the first occurrence, delete extras from Firebase
+        const seenGoogleIds = new Set();
+        const items = [];
+        for (const item of validItems) {
+          if (item.googleId) {
+            if (seenGoogleIds.has(item.googleId)) {
+              try { await fetch(`${RESV_URL}/${encodeURIComponent(item.id)}.json`, { method:"DELETE" }); } catch(e) {}
+              continue;
+            }
+            seenGoogleIds.add(item.googleId);
+          }
+          items.push(item);
+        }
+        // Fix past flag based on check-in date (not email received date)
+        items.forEach(item => { item.past = new Date(item.date + "T23:59:59") < new Date(); });
         items.sort((a, b) => new Date(a.date+" "+a.time) - new Date(b.date+" "+b.time));
         setResvItems(items);
         localStorage.setItem("pulse_resv_items", JSON.stringify(items));
