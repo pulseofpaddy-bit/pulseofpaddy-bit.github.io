@@ -5665,7 +5665,7 @@ export default function PulseApp() {
             </div>
 
             <div style={{flex:1,overflowY:"auto",padding:"10px 14px 16px",WebkitOverflowScrolling:"touch"}}>
-              {todoLoading && <div style={{textAlign:"center",paddingTop:40}}><div style={{fontSize:32,marginBottom:8}}>✅</div><div style={{fontSize:14,color:T.textFaint}}>Loading tasks…</div></div>}
+              {todoLoading && todoItems.length === 0 && <div style={{textAlign:"center",paddingTop:40}}><div style={{fontSize:32,marginBottom:8}}>✅</div><div style={{fontSize:14,color:T.textFaint}}>Syncing tasks…</div></div>}
               {!todoLoading && todoItems.length === 0 && (
                 <div style={{textAlign:"center",paddingTop:50}}>
                   <div style={{fontSize:52,marginBottom:12}}>✅</div>
@@ -5674,7 +5674,12 @@ export default function PulseApp() {
                 </div>
               )}
               {(() => {
-                const filtered = todoAssignee === "all" ? todoItems : todoItems.filter(t => t.assignee === todoAssignee);
+                // Use partial match: tab label "Rani" matches assignee "Rani Kavali", and vice versa
+                const filtered = todoAssignee === "all" ? todoItems : todoItems.filter(t => {
+                  const a = (t.assignee || "").toLowerCase();
+                  const f = todoAssignee.toLowerCase();
+                  return a === f || a.startsWith(f + " ") || f.startsWith(a + " ") || a.includes(f) || f.includes(a);
+                });
                 const pending  = filtered.filter(t => !t.done);
                 const done     = filtered.filter(t => t.done);
                 return (
