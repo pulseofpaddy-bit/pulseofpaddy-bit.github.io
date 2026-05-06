@@ -1997,22 +1997,28 @@ export default function PulseApp() {
       { q: 'subject:("booking confirmation" OR "flight confirmation" OR "e-ticket" OR "boarding pass" OR "itinerary") newer_than:180d', hint: "flight" },
       // Hotel — covers Radisson, Marriott, Hilton, IHG, Wyndham, Airbnb, VRBO etc.
       { q: 'subject:("reservation" OR "hotel" OR "check-in" OR "your stay" OR "booking confirmed" OR "confirmed") ("inn" OR "suites" OR "hotel" OR "resort" OR "lodge" OR "radisson" OR "marriott" OR "hilton" OR "hyatt" OR "wyndham" OR "ihg" OR "airbnb" OR "vrbo") newer_than:180d', hint: "hotel" },
+      // Broad hotel fallback — catches any "Your Reservation at ..." subject
+      { q: 'subject:("Your Reservation" OR "reservation is confirmed" OR "booking is confirmed" OR "stay is confirmed") newer_than:180d', hint: "hotel-broad" },
       { q: 'subject:("car rental" OR "rental confirmation" OR "vehicle reservation") newer_than:180d', hint: "car" },
       { q: 'subject:("ticket" OR "event confirmation" OR "your order" OR "booking confirmed") newer_than:180d', hint: "event" },
     ];
 
     try {
-      for (const { q } of QUERIES) {
+      for (const { q, hint } of QUERIES) {
         const listRes = await fetch(
           `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=20&q=${encodeURIComponent(q)}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        if (!listRes.ok) continue;
+        if (!listRes.ok) {
+          console.warn(`[RESV] Query ${hint} failed: HTTP ${listRes.status}`);
+          continue;
+        }
         const listData = await listRes.json();
+        console.log(`[RESV] Query ${hint}: found ${(listData.messages||[]).length} messages`);
         for (const msg of (listData.messages || []).slice(0, 10)) {
           try {
             const googleId = `gmail_resv_${email}_${msg.id}`;
-            if ((currentResvItems || []).some(r => r.googleId === googleId)) continue;
+            if ((currentResvItems || []).some(r => r.googleId === googleId)) { console.log(`[RESV] Skipping already-imported ${msg.id}`); continue; }
 
             const msgRes = await fetch(
               `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
@@ -2027,13 +2033,15 @@ export default function PulseApp() {
             if (!subject) continue;
 
             const type = classifyResvEmail(subject, body);
+            console.log(`[RESV] Subject: "${subject.slice(0,60)}" → type: ${type||"SKIP"}`);
             if (!type) continue;
 
             const { name, date, confirmNo, address, notes } = extractResvFields(subject, body, type);
             // Use email date as fallback if no date extracted
             const fallbackDate = dateHdr ? new Date(dateHdr).toISOString().split("T")[0] : "";
             const finalDate = date || fallbackDate;
-            if (!finalDate) continue;
+            console.log(`[RESV] date=${date} fallback=${fallbackDate} final=${finalDate} confirmNo=${confirmNo}`);
+            if (!finalDate) { console.warn(`[RESV] Skipping - no date found for: ${subject.slice(0,60)}`); continue; }
 
             const item = {
               type, name, date: finalDate, time:"", partySize:"",
@@ -2043,9 +2051,19 @@ export default function PulseApp() {
               source: "gmail", sourceEmail: email, googleId, createdAt: Date.now(),
             };
 
+            // Save to Firebase for persistence
+            try {
+              await fetch(`${RESV_URL}.json`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: googleId, ...item }),
+              });
+            } catch(e) {}
             setResvItems(prev => {
               if (prev.some(r => r.googleId === googleId)) return prev;
-              return [...prev, { id: googleId, ...item }];
+              const updated = [...prev, { id: googleId, ...item }];
+              localStorage.setItem("pulse_resv_items", JSON.stringify(updated));
+              return updated;
             });
             imported++;
           } catch(e) {}
@@ -2093,23 +2111,24 @@ export default function PulseApp() {
     { id:"🎳 Activity",   label:"Activity",    emoji:"🎳", color:"#F59E0B" },
   ];
 
+  // Sync when Reservations tab opens OR when gAccounts first gets populated
+  const resvSyncedRef = useRef(false);
   useEffect(() => {
-    if (mainTab === "reservations") {
-      loadResvs().then(() => {
-        // Auto-sync emails from all connected Google accounts
-        if (gAccounts.length > 0) {
-          (async () => {
-            let snapshot = [];
-            setResvItems(prev => { snapshot = prev; return prev; });
-            for (const acc of gAccounts) {
-              await syncAccountReservations(acc, snapshot);
-              setResvItems(prev => { snapshot = prev; return prev; });
-            }
-          })();
+    if (mainTab !== "reservations") { resvSyncedRef.current = false; return; }
+    if (gAccounts.length === 0) return; // wait for accounts to be injected
+    if (resvSyncedRef.current) return;  // already synced this session
+    resvSyncedRef.current = true;
+    loadResvs().then(() => {
+      (async () => {
+        let snapshot = [];
+        setResvItems(prev => { snapshot = prev; return prev; });
+        for (const acc of gAccounts) {
+          await syncAccountReservations(acc, snapshot);
+          setResvItems(prev => { snapshot = prev; return prev; });
         }
-      });
-    }
-  }, [mainTab]);
+      })();
+    });
+  }, [mainTab, gAccounts.length]);
 
   async function loadResvs() {
     setResvLoading(true);
