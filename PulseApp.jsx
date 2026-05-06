@@ -1743,9 +1743,17 @@ export default function PulseApp() {
     }
   }, [todoItems]);
 
+  // Load + poll todos every 10s when tab is active — uses shared Firebase path so ALL family members sync
   useEffect(() => {
-    if (mainTab === "todo") loadTodos();
-  }, [mainTab]);
+    if (mainTab !== "todo") return;
+    const sharedKey = fwSharedFolderKey || fwWorkspace?.folderId;
+    if (!sharedKey) { loadTodos(); return; } // fallback to Drive if no shared key yet
+    const key = sharedKey.replace(/[.#$[\]]/g, ",");
+    const fbUrl = `${FAMILY_BASE}/${key}/todos`;
+    loadTodosFromFirebase(fbUrl); // immediate load
+    const todoPollId = setInterval(() => { loadTodosFromFirebase(fbUrl); }, 10000);
+    return () => clearInterval(todoPollId);
+  }, [mainTab, fwSharedFolderKey, fwWorkspace?.folderId]);
 
   // Sync todo items to service worker so it can fire due-date reminders when app is closed
   useEffect(() => {
@@ -1756,6 +1764,33 @@ export default function PulseApp() {
       }
     } catch(e) {}
   }, [todoItems]);
+
+  // Track write-in-flight to prevent polling from overwriting local state (same pattern as grocery)
+  const todoWritePending = useRef(false);
+
+  async function loadTodosFromFirebase(fbUrl) {
+    if (todoWritePending.current) return; // write in-flight — skip poll
+    setTodoLoading(true);
+    try {
+      const res = await fetch(`${fbUrl}.json`);
+      if (!res.ok) { setTodoLoading(false); return; }
+      const data = await res.json();
+      if (data && typeof data === "object") {
+        const fbItems = Object.entries(data)
+          .map(([fbId, val]) => ({ fbId, ...val }))
+          .filter(i => i.text && i.text.trim())
+          .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+        setTodoItems(prev => {
+          // Keep any local-only items not yet in Firebase
+          const localOnly = prev.filter(i => !i.fbId && !fbItems.some(f => f.id === i.id));
+          const merged = [...fbItems, ...localOnly].sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+          localStorage.setItem("pulse_todo_items", JSON.stringify(merged));
+          return merged;
+        });
+      }
+    } catch(e) { /* keep cached data on error */ }
+    setTodoLoading(false);
+  }
 
   async function loadTodos() {
     setTodoLoading(true);
@@ -1775,6 +1810,14 @@ export default function PulseApp() {
     setTodoLoading(false);
   }
 
+  // Helper: get the shared Firebase todos URL (same key as grocery so all family members share it)
+  function getTodoFbUrl() {
+    const sharedKey = fwSharedFolderKey || fwWorkspace?.folderId;
+    if (!sharedKey) return null;
+    const key = sharedKey.replace(/[.#$[\]]/g, ",");
+    return `${FAMILY_BASE}/${key}/todos`;
+  }
+
   async function addTodo() {
     const text = todoInput.trim();
     if (!text) return;
@@ -1783,46 +1826,52 @@ export default function PulseApp() {
     setTodoDueDate("");
     const item = { id: "t_" + Date.now(), text, done:false, priority: todoPriority, assignee: todoAssignee === "all" ? "Family" : todoAssignee, dueDate: due, createdAt: Date.now(), addedBy: fwUser?.name || "Family" };
     setTodoItems(prev => { const updated = [item, ...prev]; localStorage.setItem("pulse_todo_items", JSON.stringify(updated)); return updated; });
-    if (fwWorkspace?.fileIds?.todos && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
-      if (current === null) return; // token expired
-      await fwWriteFile(fwWorkspace.fileIds.todos, [item, ...(Array.isArray(current) ? current : [])], fwToken);
+    const fbUrl = getTodoFbUrl();
+    if (fbUrl) {
+      todoWritePending.current = true;
+      try {
+        const res = await fetch(`${fbUrl}.json`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(item) });
+        const data = await res.json();
+        if (data?.name) {
+          setTodoItems(prev => { const updated = prev.map(i => i.id === item.id ? { ...i, fbId: data.name } : i); localStorage.setItem("pulse_todo_items", JSON.stringify(updated)); return updated; });
+        }
+      } catch(e) {}
+      todoWritePending.current = false;
     }
   }
-
   async function toggleTodo(id, done) {
     setTodoItems(prev => { const updated = prev.map(i => i.id === id ? { ...i, done: !done } : i); localStorage.setItem("pulse_todo_items", JSON.stringify(updated)); return updated; });
-    if (fwWorkspace?.fileIds?.todos && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
-      if (current === null) return; // token expired
-      await fwWriteFile(fwWorkspace.fileIds.todos, (Array.isArray(current) ? current : []).map(i => i.id === id ? { ...i, done: !done } : i), fwToken);
+    const fbUrl = getTodoFbUrl();
+    if (fbUrl) {
+      const item = todoItems.find(i => i.id === id);
+      if (item?.fbId) {
+        try { await fetch(`${fbUrl}/${item.fbId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ done: !done }) }); } catch(e) {}
+      }
     }
   }
-
   async function deleteTodo(id) {
+    const item = todoItems.find(i => i.id === id);
     setTodoItems(prev => { const updated = prev.filter(i => i.id !== id); localStorage.setItem("pulse_todo_items", JSON.stringify(updated)); return updated; });
-    if (fwWorkspace?.fileIds?.todos && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
-      if (current === null) return;
-      await fwWriteFile(fwWorkspace.fileIds.todos, (Array.isArray(current) ? current : []).filter(i => i.id !== id), fwToken);
+    const fbUrl = getTodoFbUrl();
+    if (fbUrl && item?.fbId) {
+      try { await fetch(`${fbUrl}/${item.fbId}.json`, { method:"DELETE" }); } catch(e) {}
     }
   }
   async function updateTodo(id, newText, newPriority, newDueDate) {
     const text = newText.trim();
     if (!text) return;
     setEditingTodoId(null);
+    const item = todoItems.find(i => i.id === id);
     setTodoItems(prev => {
       const updated = prev.map(i => i.id === id ? { ...i, text, priority: newPriority, dueDate: newDueDate } : i);
       localStorage.setItem("pulse_todo_items", JSON.stringify(updated));
       return updated;
     });
-    if (fwWorkspace?.fileIds?.todos && fwToken) {
-      const current = await fwReadFile(fwWorkspace.fileIds.todos, fwToken);
-      if (current === null) return;
-      await fwWriteFile(fwWorkspace.fileIds.todos, (Array.isArray(current) ? current : []).map(i => i.id === id ? { ...i, text, priority: newPriority, dueDate: newDueDate } : i), fwToken);
+    const fbUrl = getTodoFbUrl();
+    if (fbUrl && item?.fbId) {
+      try { await fetch(`${fbUrl}/${item.fbId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ text, priority: newPriority, dueDate: newDueDate }) }); } catch(e) {}
     }
   }
-
   // ─── GOOGLE OAUTH / RESERVATION SYNC MULTI-ACCOUNT (up to ────────────────────────────────────────
   // ⚠️  SETUP: Replace with your Google Cloud OAuth Client ID
   // ─── Steps New Project APIs & Services ────────────────────────────────────────
@@ -5539,7 +5588,7 @@ export default function PulseApp() {
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   {todoItems.some(t=>t.done) && (
-                    <div onClick={async()=>{const done=todoItems.filter(t=>t.done);setTodoItems(p=>p.filter(t=>!t.done));try{await Promise.all(done.map(t=>fetch(`${TODO_URL}/${t.id}.json`,{method:"DELETE"})));}catch(e){}}} style={{fontSize:11,fontWeight:700,color:"#FF3B5C",cursor:"pointer",background:"rgba(255,59,92,0.1)",padding:"6px 12px",borderRadius:20}}>Clear Done</div>
+                    <div onClick={async()=>{const done=todoItems.filter(t=>t.done);setTodoItems(p=>p.filter(t=>!t.done));const fbUrl=getTodoFbUrl();if(fbUrl){try{await Promise.all(done.filter(t=>t.fbId).map(t=>fetch(`${fbUrl}/${t.fbId}.json`,{method:"DELETE"})));}catch(e){}}}} style={{fontSize:11,fontWeight:700,color:"#FF3B5C",cursor:"pointer",background:"rgba(255,59,92,0.1)",padding:"6px 12px",borderRadius:20}}>Clear Done</div>
                   )}
                   <div onClick={()=>{setShowAddTodo(p=>!p);setTodoInput("");setTodoDueDate("");setTodoPriority("medium");}} style={{width:36,height:36,borderRadius:18,background:showAddTodo?"#A855F7":"rgba(168,85,247,0.15)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,transition:"all 0.2s"}} title={showAddTodo?"Close":"Add Task"}>
                     <span style={{fontSize:22,color:showAddTodo?"#fff":"#A855F7",fontWeight:300,lineHeight:1,marginTop:showAddTodo?1:-1}}>{showAddTodo?"×":"+"}</span>
