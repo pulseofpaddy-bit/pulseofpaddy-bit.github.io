@@ -2324,7 +2324,10 @@ export default function PulseApp() {
             console.log(`[RESV] Subject: "${subject.slice(0,60)}" → type: ${type||"SKIP"}`);
             if (!type) continue;
 
+            // DEBUG: log raw body to console
+            console.log(`[RESV-BODY]`, JSON.stringify(body.slice(0,1200)));
             const { name, date, confirmNo, address, notes, checkOut, time: parsedTime, checkInTime, checkOutTime } = extractResvFields(subject, body, type);
+            console.log(`[RESV-PARSED] name="${name}" confirmNo="${confirmNo}" date="${date}" checkOut="${checkOut}" addr="${address.slice(0,50)}"`);
             // Use email date as fallback only for non-hotel types (hotels must have a check-in date)
             const fallbackDate = dateHdr ? new Date(dateHdr).toISOString().split("T")[0] : "";
             const finalDate = date || (type !== "🏨 Hotel" ? fallbackDate : "");
