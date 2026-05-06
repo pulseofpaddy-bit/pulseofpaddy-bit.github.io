@@ -1811,12 +1811,24 @@ export default function PulseApp() {
   });
   const [gSyncing, setGSyncing]   = useState({}); // { email: true/false }
   const [gSyncMsg, setGSyncMsg]   = useState({}); // { email: "message" }
-
   function saveGAccounts(accounts) {
     setGAccounts(accounts);
     localStorage.setItem("pulse_gaccounts", JSON.stringify(accounts));
   }
-
+  // Auto-inject the already-logged-in fwUser into gAccounts so Reservations
+  // Gmail sync works without a separate "Connect Google" step.
+  useEffect(() => {
+    if (!fwUser?.email || !fwToken) return;
+    setGAccounts(prev => {
+      const already = prev.find(a => a.email === fwUser.email);
+      if (already && already.token === fwToken) return prev; // no change needed
+      const updated = already
+        ? prev.map(a => a.email === fwUser.email ? { ...a, token: fwToken, expired: false } : a)
+        : [...prev, { email: fwUser.email, token: fwToken, name: fwUser.name || fwUser.email, picture: fwUser.picture || "" }];
+      localStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
+      return updated;
+    });
+  }, [fwUser?.email, fwToken]);
   function googleAddAccount() {
     if (gAccounts.length >= MAX_ACCOUNTS) return;
     if (GOOGLE_CLIENT_ID === "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com") {
