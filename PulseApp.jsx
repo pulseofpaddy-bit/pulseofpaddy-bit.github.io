@@ -2110,7 +2110,14 @@ export default function PulseApp() {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!listRes.ok) {
-          console.warn(`[RESV] Query ${hint} failed: HTTP ${listRes.status}`);
+          const errText = await listRes.text().catch(()=>"");
+          console.warn(`[RESV] Query ${hint} failed: HTTP ${listRes.status}`, errText.slice(0,200));
+          if (listRes.status === 401 || listRes.status === 403) {
+            saveGAccounts(gAccounts.map(a => a.email === email ? { ...a, expired: true } : a));
+            setGSyncMsg(prev => ({ ...prev, [email]: `⚠️ Session expired (${listRes.status}) — log out & back in` }));
+            setGSyncing(prev => ({ ...prev, [email]: false }));
+            return; // stop all queries for this account
+          }
           continue;
         }
         const listData = await listRes.json();
@@ -2170,7 +2177,7 @@ export default function PulseApp() {
         }
       }
 
-      setGSyncMsg(prev => ({ ...prev, [email]: imported > 0 ? `✅ Imported ${imported} booking${imported>1?"s":""}` : "✅ Up to date" }));
+      setGSyncMsg(prev => ({ ...prev, [email]: imported > 0 ? `✅ Imported ${imported} booking${imported>1?"s":""}` : `✅ Scanned — no new bookings found (${email})` }));
     } catch(e) {
       if (String(e).includes("401")) {
         saveGAccounts(gAccounts.map(a => a.email === email ? { ...a, expired: true } : a));
@@ -5885,6 +5892,12 @@ export default function PulseApp() {
                       )}
                       <div onClick={()=>setShowResvForm(true)} style={{display:"inline-block",background:"linear-gradient(135deg,#F97316,#EAB308)",borderRadius:16,padding:"12px 24px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#fff"}}>+ Add Reservation</div>
                     </div>
+                    {/* Sync status messages */}
+                    {Object.entries(gSyncMsg).map(([email, msg]) => (
+                      <div key={email} style={{marginTop:12,fontSize:12,color:msg.startsWith("⚠️")?"#FF3B5C":msg.startsWith("✅")?"#10B981":T.textFaint,textAlign:"center",padding:"8px 12px",background:msg.startsWith("⚠️")?"rgba(255,59,92,0.1)":msg.startsWith("✅")?"rgba(16,185,129,0.1)":"transparent",borderRadius:8}}>
+                        {msg}{msg.includes("expired") ? " — Please log out and log back in" : ""}
+                      </div>
+                    ))}
                 </div>
               )}
               {(() => {
