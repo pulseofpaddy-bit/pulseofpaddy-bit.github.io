@@ -1992,15 +1992,20 @@ export default function PulseApp() {
     setGSyncMsg(prev => ({ ...prev, [email]: "Scanning Gmail for bookings…" }));
     let imported = 0;
 
-    // Gmail search queries per reservation category
+    // Gmail search queries — using simple subject: syntax that Gmail API reliably supports
     const QUERIES = [
-      { q: 'subject:("booking confirmation" OR "flight confirmation" OR "e-ticket" OR "boarding pass" OR "itinerary") newer_than:180d', hint: "flight" },
-      // Hotel — covers Radisson, Marriott, Hilton, IHG, Wyndham, Airbnb, VRBO etc.
-      { q: 'subject:("reservation" OR "hotel" OR "check-in" OR "your stay" OR "booking confirmed" OR "confirmed") ("inn" OR "suites" OR "hotel" OR "resort" OR "lodge" OR "radisson" OR "marriott" OR "hilton" OR "hyatt" OR "wyndham" OR "ihg" OR "airbnb" OR "vrbo") newer_than:180d', hint: "hotel" },
-      // Broad hotel fallback — catches any "Your Reservation at ..." subject
-      { q: 'subject:("Your Reservation" OR "reservation is confirmed" OR "booking is confirmed" OR "stay is confirmed") newer_than:180d', hint: "hotel-broad" },
-      { q: 'subject:("car rental" OR "rental confirmation" OR "vehicle reservation") newer_than:180d', hint: "car" },
-      { q: 'subject:("ticket" OR "event confirmation" OR "your order" OR "booking confirmed") newer_than:180d', hint: "event" },
+      // Flights
+      { q: 'subject:"booking confirmation" OR subject:"flight confirmation" OR subject:"e-ticket" OR subject:"boarding pass" newer_than:180d', hint: "flight" },
+      // Hotels — broad: catch "Your Reservation at ..."
+      { q: 'subject:"Your Reservation" newer_than:180d', hint: "hotel-resv" },
+      // Hotels — confirmed stay
+      { q: 'subject:"reservation" subject:"confirmed" newer_than:180d', hint: "hotel-confirmed" },
+      // Hotels — chain names
+      { q: 'subject:"hotel" OR subject:"inn" OR subject:"suites" OR subject:"resort" newer_than:180d', hint: "hotel-chain" },
+      // Car rental
+      { q: 'subject:"car rental" OR subject:"rental confirmation" newer_than:180d', hint: "car" },
+      // Events
+      { q: 'subject:"event confirmation" OR subject:"ticket" OR subject:"booking confirmed" newer_than:180d', hint: "event" },
     ];
 
     try {
