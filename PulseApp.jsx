@@ -1906,6 +1906,8 @@ export default function PulseApp() {
   function classifyResvEmail(subject, body) {
     const s = (subject + " " + body).toLowerCase();
     if (/flight|boarding pass|e-ticket|airline|depart|arrival|seat assignment|itinerary.*flight|book.*flight|flight.*book|air canada|delta|united|american airlines|southwest|lufthansa|emirates|indigo|air india|spicejet/.test(s)) return "✈️ Flight";
+    // Hotel — broad match covering major chains and generic confirmation language
+    if (/hotel|motel|inn|suites?|resort|lodge|hostel|bnb|bed.?and.?breakfast|check.?in|check.?out|room reservation|stay.*confirm|confirm.*stay|radisson|marriott|hilton|hyatt|ihg|holiday inn|hampton|courtyard|sheraton|westin|doubletree|best western|wyndham|days inn|super 8|comfort inn|quality inn|country inn|la quinta|extended stay|embassy suites|homewood|home2|tru by|tapestry|curio|autograph|renaissance|le meridien|w hotel|st\.? regis|ritz.?carlton|four seasons|intercontinental|crowne plaza|kimpton|omni|loews|novotel|ibis|accor|sofitel|fairmont|waldorf|conrad|canopy|curio|tribute|vignette|tapestry|aloft|element hotel|moxy|ac hotel|delta hotel|autograph|design hotel|boutique hotel|airbnb|vrbo|vacation rental/.test(s)) return "🏨 Hotel";
     if (/car rental|rental car|vehicle reservation|pick.?up.*car|hertz|avis|enterprise|budget|national|alamo|sixt|thrifty|dollar rent/.test(s)) return "🚗 Car Rental";
     if (/ticket|concert|show|event|festival|game|match|theater|theatre|museum|tour|admission|eventbrite|ticketmaster|stubhub|live nation/.test(s)) return "🎭 Event";
     if (/activity|adventure|excursion|tour|booking.*activity|experience|zipline|kayak|snorkel|dive|safari|spa|golf|bowling/.test(s)) return "🎳 Activity";
@@ -1914,41 +1916,61 @@ export default function PulseApp() {
 
   function extractResvFields(subject, body, type) {
     const lines = body.split(/\n|\r/).map(l => l.trim()).filter(Boolean);
-    const all   = body.toLowerCase();
-
-    // Confirmation number
+    // Confirmation number — also match standalone numbers like "34789903"
     let confirmNo = "";
-    const confMatch = body.match(/(?:confirmation|booking|reservation|record|pnr|reference)\s*(?:number|code|#|no\.?)?\s*[:\-]?\s*([A-Z0-9]{4,12})/i);
+    const confMatch = body.match(/(?:confirmation|booking|reservation|record|pnr|reference)\s*(?:number|code|#|no\.?)?\s*[:\-]?\s*([A-Z0-9]{4,12})/i)
+                   || body.match(/#\s*([A-Z0-9]{6,12})/i);
     if (confMatch) confirmNo = confMatch[1].toUpperCase();
-
-    // Date — look for check-in / departure / event date
+    // Date — hotel check-in first, then generic patterns
     let date = "";
+    let checkOut = "";
     const datePatterns = [
+      // "Thu, May 7" or "Thu May 7, 2026" style
+      /(?:check.?in|arrival|departure|event|date)\s*[:\-]?\s*(?:starts?\s*(?:at\s*[\d:apm]+)?)?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i,
       /(?:check.?in|arrival|departure|event|date)\s*[:\-]?\s*(\w+ \d{1,2},?\s*\d{4})/i,
-      /(?:check.?in|arrival|departure|event|date)\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+      /(?:check.?in|arrival|departure|event|date)\s*[:\-]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
       /(\d{4}-\d{2}-\d{2})/,
     ];
     for (const p of datePatterns) {
       const m = body.match(p);
-      if (m) { const d = new Date(m[1]); if (!isNaN(d)) { date = d.toISOString().split("T")[0]; break; } }
+      if (m) {
+        // Append current year if missing
+        let ds = m[1].trim();
+        if (!/\d{4}/.test(ds)) ds += " " + new Date().getFullYear();
+        const d = new Date(ds);
+        if (!isNaN(d)) { date = d.toISOString().split("T")[0]; break; }
+      }
     }
-
-    // Name / property / airline
+    // Check-out date for hotels
+    const coPatterns = [
+      /(?:check.?out|departure)\s*[:\-]?\s*(?:before\s*[\d:apm]+)?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i,
+      /(?:check.?out|departure)\s*[:\-]?\s*(\w+ \d{1,2},?\s*\d{4})/i,
+    ];
+    for (const p of coPatterns) {
+      const m = body.match(p);
+      if (m) {
+        let ds = m[1].trim();
+        if (!/\d{4}/.test(ds)) ds += " " + new Date().getFullYear();
+        const d = new Date(ds);
+        if (!isNaN(d)) { checkOut = d.toISOString().split("T")[0]; break; }
+      }
+    }
+    // Name / property
     let name = subject.replace(/^(Fwd:|Re:|Fw:)\s*/i,"").replace(/\s+/g," ").trim().slice(0,80);
-
-    // Address / location
+    // Address — look for street address pattern (number + street)
     let address = "";
-    const addrMatch = body.match(/(?:address|location|property|hotel|venue)\s*[:\-]?\s*([^\n]{10,80})/i);
-    if (addrMatch) address = addrMatch[1].trim().slice(0,80);
-
-    // Flight-specific: route
+    const addrMatch = body.match(/(\d{2,5}\s+[A-Za-z][^\n,]{5,60}(?:,\s*[A-Za-z][^\n]{3,40}){1,3})/)
+                   || body.match(/(?:address|location|property|hotel|venue)\s*[:\-]?\s*([^\n]{10,80})/i);
+    if (addrMatch) address = addrMatch[1].trim().slice(0,100);
+    // Notes
     let notes = "";
     if (type === "✈️ Flight") {
       const routeMatch = body.match(/([A-Z]{3})\s*(?:→|->|to|→)\s*([A-Z]{3})/i);
       if (routeMatch) notes = `${routeMatch[1].toUpperCase()} → ${routeMatch[2].toUpperCase()}`;
     }
-
-
+    if (type === "🏨 Hotel" && checkOut) {
+      notes = `Check-out: ${checkOut}`;
+    }
     return { name, date, confirmNo, address, notes };
   }
 
@@ -1961,7 +1983,8 @@ export default function PulseApp() {
     // Gmail search queries per reservation category
     const QUERIES = [
       { q: 'subject:("booking confirmation" OR "flight confirmation" OR "e-ticket" OR "boarding pass" OR "itinerary") newer_than:180d', hint: "flight" },
-
+      // Hotel — covers Radisson, Marriott, Hilton, IHG, Wyndham, Airbnb, VRBO etc.
+      { q: 'subject:("reservation" OR "hotel" OR "check-in" OR "your stay" OR "booking confirmed" OR "confirmed") ("inn" OR "suites" OR "hotel" OR "resort" OR "lodge" OR "radisson" OR "marriott" OR "hilton" OR "hyatt" OR "wyndham" OR "ihg" OR "airbnb" OR "vrbo") newer_than:180d', hint: "hotel" },
       { q: 'subject:("car rental" OR "rental confirmation" OR "vehicle reservation") newer_than:180d', hint: "car" },
       { q: 'subject:("ticket" OR "event confirmation" OR "your order" OR "booking confirmed") newer_than:180d', hint: "event" },
     ];
@@ -2052,6 +2075,7 @@ export default function PulseApp() {
   const TODO_URL = "https://pulse-family-default-rtdb.firebaseio.com/todos";
   const RESV_TYPES = [
     { id:"✈️ Flight",     label:"Flight",      emoji:"✈️", color:"#6366F1" },
+    { id:"🏨 Hotel",       label:"Hotel",       emoji:"🏨", color:"#10B981" },
     { id:"🎭 Event",      label:"Event",       emoji:"🎭", color:"#EC4899" },
     { id:"🚗 Car Rental", label:"Car Rental",  emoji:"🚗", color:"#F97316" },
     { id:"🎳 Activity",   label:"Activity",    emoji:"🎳", color:"#F59E0B" },
