@@ -592,6 +592,65 @@ export default function PulseApp() {
   const [fwInviteError, setFwInviteError] = useState("");
   const [fwInviteGender, setFwInviteGender] = useState("");
 
+  // ─── SILENT TOKEN REFRESH ────────────────────────────────────────
+  // Uses a hidden iframe with prompt=none to silently refresh the OAuth token
+  // before it expires, so the user never has to log out and back in.
+  const silentRefreshRef = useRef(null);
+  function doSilentTokenRefresh() {
+    if (!fwUser?.email) return;
+    const params = new URLSearchParams({
+      client_id: FAMILY_CLIENT_ID,
+      redirect_uri: window.location.origin + window.location.pathname,
+      response_type: "token",
+      scope: FAMILY_SCOPES,
+      prompt: "none",
+      login_hint: fwUser.email,
+      include_granted_scopes: "true",
+    });
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+    // Remove old iframe if any
+    if (silentRefreshRef.current) { try { document.body.removeChild(silentRefreshRef.current); } catch(e) {} }
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = url;
+    iframe.onload = () => {
+      try {
+        const iframeHash = iframe.contentWindow?.location?.hash || "";
+        if (iframeHash.includes("access_token")) {
+          const p = new URLSearchParams(iframeHash.replace("#", "?"));
+          const newToken = p.get("access_token");
+          const expiresIn = parseInt(p.get("expires_in") || "3600", 10);
+          if (newToken) {
+            setFwToken(newToken);
+            localStorage.setItem("pulse_fw_token", newToken);
+            localStorage.setItem("pulse_fw_token_exp", String(Date.now() + expiresIn * 1000));
+            // Also update gAccounts so reservation sync uses fresh token
+            saveGAccounts(prev => prev.map(a => a.email === fwUser.email ? { ...a, token: newToken, expired: false } : a));
+            console.log("[AUTH] Silent token refresh succeeded");
+          }
+        }
+      } catch(e) { /* cross-origin block means user needs to re-login */ }
+      try { document.body.removeChild(iframe); } catch(e) {}
+      silentRefreshRef.current = null;
+    };
+    document.body.appendChild(iframe);
+    silentRefreshRef.current = iframe;
+  }
+  // Schedule silent refresh: run 5 min before token expires, and every 50 minutes
+  useEffect(() => {
+    if (!fwUser || !fwToken) return;
+    const expiry = parseInt(localStorage.getItem("pulse_fw_token_exp") || "0", 10);
+    const msUntilRefresh = expiry ? Math.max(expiry - Date.now() - 5 * 60 * 1000, 10000) : 50 * 60 * 1000;
+    const timer = setTimeout(() => {
+      doSilentTokenRefresh();
+    }, msUntilRefresh);
+    // Also refresh every 50 minutes as a safety net
+    const interval = setInterval(() => {
+      doSilentTokenRefresh();
+    }, 50 * 60 * 1000);
+    return () => { clearTimeout(timer); clearInterval(interval); };
+  }, [fwUser?.email, fwToken]);
+
   // ─── ONBOARDING STATE ────────────────────────────────────────
   // Steps: "splash" → "role" → "add_members" → done (null)
   const [onboardingStep, setOnboardingStep] = useState(() => {
@@ -5895,7 +5954,24 @@ export default function PulseApp() {
                     {/* Sync status messages */}
                     {Object.entries(gSyncMsg).map(([email, msg]) => (
                       <div key={email} style={{marginTop:12,fontSize:12,color:msg.startsWith("⚠️")?"#FF3B5C":msg.startsWith("✅")?"#10B981":T.textFaint,textAlign:"center",padding:"8px 12px",background:msg.startsWith("⚠️")?"rgba(255,59,92,0.1)":msg.startsWith("✅")?"rgba(16,185,129,0.1)":"transparent",borderRadius:8}}>
-                        {msg}{msg.includes("expired") ? " — Please log out and log back in" : ""}
+                        {msg}
+                        {msg.includes("expired") && (
+                          <div style={{marginTop:8}}>
+                            <span
+                              onClick={()=>{
+                                setGSyncMsg(prev=>({...prev,[email]:"🔄 Refreshing session…"}));
+                                doSilentTokenRefresh();
+                                setTimeout(()=>{
+                                  setGSyncMsg(prev=>({...prev,[email]:""}))
+                                  resvSyncedRef.current=false;
+                                  loadResvs().then(()=>syncAllAccounts());
+                                },3000);
+                              }}
+                              style={{display:"inline-block",background:"#FF3B5C",color:"#fff",padding:"6px 14px",borderRadius:20,cursor:"pointer",fontWeight:700,fontSize:12}}
+                            >🔄 Refresh Session</span>
+                            <span style={{display:"block",marginTop:6,fontSize:11,color:T.textFaint}}>or log out &amp; back in for a full reset</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                 </div>
