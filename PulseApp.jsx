@@ -6079,29 +6079,81 @@ export default function PulseApp() {
                     {upcoming.map((r, i) => {
                       const rt = RESV_TYPES.find(t => t.id === r.type) || { id:"other", label:"Other", emoji:"🗓️", color:"#6B7280" };
                       return (
-                        <div key={r.id} style={{background:T.bgCard,borderRadius:18,padding:"14px 16px",marginBottom:10,border:`1px solid ${T.border}`,borderLeft:`3px solid ${rt.color}`,animation:`slideUp 0.25s ease ${i*0.05}s both`}}>
-                          <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
-                            <div style={{fontSize:26,flexShrink:0}}>{rt.emoji}</div>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                                <div style={{fontSize:15,fontWeight:800,color:T.text}}>{r.name}</div>
-                                <div onClick={()=>deleteResv(r.id)} style={{fontSize:15,cursor:"pointer",color:T.textFaint,padding:"2px 4px"}}>❌</div>
-                              </div>
-                              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                                <span style={{fontSize:10,fontWeight:700,color:rt.color,background:`${rt.color}18`,padding:"2px 8px",borderRadius:20}}>{rt.emoji} {rt.label}</span>
-                                {r.date && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🛬 Check-in: {new Date(r.date+"T12:00:00").toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"})}</span>}
-                                {(r.checkOut || (r.notes && r.notes.startsWith("Check-out:"))) && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🛫 Check-out: {(() => { const co = r.checkOut || (r.notes||"").replace("Check-out:","").trim(); try { return new Date(co+"T12:00:00").toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"}); } catch { return co; } })()}</span>}
-                                {r.time && !r.checkOut && !r.notes?.startsWith("Check-out:") && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>🕐 {r.time}</span>}
-                                {r.partySize && <span style={{fontSize:10,color:T.textMuted,fontWeight:600}}>👥 {r.partySize} guests</span>}
-                              </div>
-                              {r.address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}`} target="_blank" rel="noopener noreferrer" style={{textDecoration:"none"}}><div style={{fontSize:11,color:rt.color,marginBottom:3}}>📍 {r.address} <span style={{fontSize:9,opacity:0.7}}>↗ Maps</span></div></a>}
-                              {r.confirmNo && <div style={{fontSize:11,color:T.textMuted,marginBottom:3}}>🎫 Confirmation: <strong style={{color:T.text}}>{r.confirmNo}</strong></div>}
-                              {r.notes && !r.notes.startsWith("Check-out:") && <div style={{fontSize:11,color:T.textFaint,fontStyle:"italic"}}>{r.notes}</div>}
-                              {r.source === "gcal" && <div style={{fontSize:9,fontWeight:700,color:"#10B981",marginTop:4,display:"flex",alignItems:"center",gap:4}}><span style={{background:"rgba(16,185,129,0.15)",borderRadius:6,padding:"1px 5px"}}>📅 Google Calendar</span><span style={{color:T.textFaint}}>{r.sourceEmail||""}</span></div>}
-                              {r.source === "gmail" && <div style={{fontSize:9,fontWeight:700,color:"#6366F1",marginTop:4,display:"flex",alignItems:"center",gap:4}}><span style={{background:"rgba(99,102,241,0.15)",borderRadius:6,padding:"1px 5px"}}>📧 Gmail</span><span style={{color:T.textFaint}}>{r.sourceEmail||""}</span></div>}
+                        <div key={r.id} style={{background:T.bgCard,borderRadius:18,padding:"16px",marginBottom:10,border:`1px solid ${T.border}`,borderLeft:`4px solid ${rt.color}`,animation:`slideUp 0.25s ease ${i*0.05}s both`}}>
+                          {/* ── Header: emoji + type badge + delete ── */}
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontSize:22}}>{rt.emoji}</span>
+                              <span style={{fontSize:10,fontWeight:700,color:rt.color,background:`${rt.color}18`,padding:"3px 9px",borderRadius:20,letterSpacing:"0.03em"}}>{rt.label.toUpperCase()}</span>
                             </div>
+                            <div onClick={()=>deleteResv(r.id)} style={{fontSize:16,cursor:"pointer",color:T.textFaint,padding:"4px 6px",borderRadius:8,lineHeight:1}} title="Delete">✕</div>
                           </div>
-                          <div onClick={()=>markResvPast(r.id, r.past)} style={{marginTop:10,background:isDark?`${rt.color}12`:`${rt.color}10`,border:`1px solid ${rt.color}30`,borderRadius:10,padding:"7px",textAlign:"center",cursor:"pointer",fontSize:11,fontWeight:700,color:rt.color}}>
+                          {/* ── Hotel / venue name ── */}
+                          <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:10,lineHeight:1.3}}>{r.name}</div>
+                          {/* ── Structured info rows ── */}
+                          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                            {r.address && (
+                              <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+                                <span style={{fontSize:11,fontWeight:700,color:T.textFaint,minWidth:72,paddingTop:1}}>Location</span>
+                                <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}`} target="_blank" rel="noopener noreferrer" style={{textDecoration:"none",flex:1}}>
+                                  <span style={{fontSize:12,color:rt.color,fontWeight:600,lineHeight:1.4,display:"flex",alignItems:"center",gap:4}}>
+                                    📍 {r.address}
+                                    <span style={{fontSize:10,background:`${rt.color}20`,borderRadius:6,padding:"1px 5px",fontWeight:700,flexShrink:0}}>Maps ↗</span>
+                                  </span>
+                                </a>
+                              </div>
+                            )}
+                            {r.date && (
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:11,fontWeight:700,color:T.textFaint,minWidth:72}}>Check-in</span>
+                                <span style={{fontSize:13,fontWeight:700,color:T.text}}>
+                                  {new Date(r.date+"T12:00:00").toLocaleDateString([],{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
+                                  {r.time && <span style={{fontSize:11,color:T.textMuted,fontWeight:500}}> · {r.time}</span>}
+                                </span>
+                              </div>
+                            )}
+                            {(r.checkOut || (r.notes && r.notes.startsWith("Check-out:"))) && (
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:11,fontWeight:700,color:T.textFaint,minWidth:72}}>Check-out</span>
+                                <span style={{fontSize:13,fontWeight:700,color:T.text}}>
+                                  {(() => {
+                                    const co = r.checkOut || (r.notes||"").replace("Check-out:","").trim();
+                                    try { return new Date(co+"T12:00:00").toLocaleDateString([],{weekday:"short",month:"short",day:"numeric",year:"numeric"}); }
+                                    catch { return co; }
+                                  })()}
+                                </span>
+                              </div>
+                            )}
+                            {r.confirmNo && (
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:11,fontWeight:700,color:T.textFaint,minWidth:72}}>Confirm #</span>
+                                <span style={{fontSize:13,fontWeight:700,color:T.text,fontFamily:"monospace,monospace",letterSpacing:"0.05em"}}>{r.confirmNo}</span>
+                              </div>
+                            )}
+                            {r.partySize && (
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:11,fontWeight:700,color:T.textFaint,minWidth:72}}>Guests</span>
+                                <span style={{fontSize:13,color:T.text}}>👥 {r.partySize}</span>
+                              </div>
+                            )}
+                            {r.notes && !r.notes.startsWith("Check-out:") && (
+                              <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+                                <span style={{fontSize:11,fontWeight:700,color:T.textFaint,minWidth:72,paddingTop:1}}>Notes</span>
+                                <span style={{fontSize:11,color:T.textFaint,fontStyle:"italic",flex:1}}>{r.notes}</span>
+                              </div>
+                            )}
+                          </div>
+                          {/* ── Source badge ── */}
+                          {(r.source === "gcal" || r.source === "gmail") && (
+                            <div style={{marginTop:8,display:"flex",alignItems:"center",gap:4}}>
+                              <span style={{fontSize:9,fontWeight:700,color:r.source==="gcal"?"#10B981":"#6366F1",background:r.source==="gcal"?"rgba(16,185,129,0.12)":"rgba(99,102,241,0.12)",borderRadius:6,padding:"2px 6px"}}>
+                                {r.source==="gcal"?"📅 Google Calendar":"📧 Gmail"}
+                              </span>
+                              {r.sourceEmail && <span style={{fontSize:9,color:T.textFaint}}>{r.sourceEmail}</span>}
+                            </div>
+                          )}
+                          {/* ── Mark as Past button ── */}
+                          <div onClick={()=>markResvPast(r.id, r.past)} style={{marginTop:12,background:isDark?`${rt.color}12`:`${rt.color}10`,border:`1px solid ${rt.color}30`,borderRadius:10,padding:"8px",textAlign:"center",cursor:"pointer",fontSize:11,fontWeight:700,color:rt.color}}>
                             ✔ Mark as Past
                           </div>
                         </div>
