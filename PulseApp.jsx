@@ -2102,33 +2102,30 @@ export default function PulseApp() {
     return isNaN(d) ? "" : d.toISOString().split("T")[0];
   }
   function extractResvFields(subject, body, type) {
-    // ── Confirmation number ──────────────────────────────────────────
     // Blocklist: words that appear near "confirmation" but are NOT a conf number
-    const CONF_BLOCKLIST = /^(FORWARDING|CONFIRMED|RESERVATION|BOOKING|NUMBER|HOTEL|FLIGHT|EMAIL|PLEASE|MANAGE|CANCEL|MODIFY|POLICY|CONTACT|SUPPORT|DETAILS|RECEIPT|PAYMENT|AMOUNT|TOTAL|PRICE|RATE|ROOM|NIGHT|NIGHTS|GUEST|GUESTS|CHECK|STAY|DATE|TIME|ARRIVAL|DEPART|YOUR|THIS|THAT|WITH|FROM|HAVE|BEEN|WILL|THANK|HELLO|DEAR|SINCERELY|REGARDS|TEAM|STAFF|SERVICE|PROPERTY|LOCATION|ADDRESS|PHONE|CITY|STATE|ZIP|USA|INC|LLC|LTD)$/;
+    const CONF_BLOCKLIST = /^(FORWARDING|CONFIRMED|RESERVATION|BOOKING|NUMBER|HOTEL|FLIGHT|EMAIL|PLEASE|MANAGE|CANCEL|MODIFY|POLICY|CONTACT|SUPPORT|DETAILS|RECEIPT|PAYMENT|AMOUNT|TOTAL|PRICE|RATE|ROOM|NIGHT|NIGHTS|GUEST|GUESTS|CHECK|STAY|DATE|TIME|ARRIVAL|DEPART|YOUR|THIS|THAT|WITH|FROM|HAVE|BEEN|WILL|THANK|HELLO|DEAR|SINCERELY|REGARDS|TEAM|STAFF|SERVICE|PROPERTY|LOCATION|ADDRESS|PHONE|CITY|STATE|ZIP|USA|INC|LLC|LTD)$/i;
+
+    // ── Confirmation number ──────────────────────────────────────────
     let confirmNo = "";
-    // Priority 1: "Confirmation number\n34789903" — pure digits or alphanumeric on next line
-    const confBlockMatch = body.match(/confirmation\s*(?:number|#|no\.?|id)?\s*[\r\n]+\s*([A-Z0-9]{5,14})(?!\w)/i);
-    if (confBlockMatch) {
-      const c = confBlockMatch[1].toUpperCase();
-      if (!CONF_BLOCKLIST.test(c)) confirmNo = c;
-    }
-    // Priority 2: inline "Confirmation number: 34789903"
+    // P1: "Confirmation number\n34789903" OR "Confirmation number    34789903" (tabs/spaces on same or next line)
+    const confP1 = body.match(/confirmation\s*(?:number|#|no\.?|id)?\s*[\r\n\t ]+\s*(\d{5,14})(?!\d)/i);
+    if (confP1 && !CONF_BLOCKLIST.test(confP1[1])) confirmNo = confP1[1];
+    // P2: inline "Confirmation number: 34789903" or "Confirmation: ABC123"
     if (!confirmNo) {
       const m = body.match(/confirmation\s*(?:number|#|no\.?|id)?\s*[:\-#]\s*([A-Z0-9]{5,14})(?!\w)/i);
-      if (m) {
-        const c = m[1].toUpperCase();
-        if (!CONF_BLOCKLIST.test(c)) confirmNo = c;
-      }
+      if (m && !CONF_BLOCKLIST.test(m[1].toUpperCase())) confirmNo = m[1];
     }
-    // Priority 3: "Booking reference: ABC123" or "Reservation ID: 12345"
+    // P3: "Booking reference: ABC123" or "Reservation ID: 12345"
     if (!confirmNo) {
       const m = body.match(/(?:booking\s*(?:ref(?:erence)?|id|number|code)|reservation\s*(?:id|number|code)|ref(?:erence)?\s*(?:number|#|no\.?)?)\s*[:\-#]?\s*([A-Z0-9]{5,14})(?!\w)/i);
-      if (m) {
-        const c = m[1].toUpperCase();
-        if (!CONF_BLOCKLIST.test(c)) confirmNo = c;
-      }
+      if (m && !CONF_BLOCKLIST.test(m[1].toUpperCase())) confirmNo = m[1];
     }
-    // Priority 4: standalone # followed by 6-10 digits
+    // P4: 7-10 digit number followed by Phone or +1 on same line (Radisson layout)
+    if (!confirmNo) {
+      const m = body.match(/(\d{7,10})\s+(?:Phone|\+1)/i);
+      if (m) confirmNo = m[1];
+    }
+    // P5: standalone # followed by 6-10 digits
     if (!confirmNo) {
       const m = body.match(/#\s*(\d{6,10})(?!\d)/);
       if (m) confirmNo = m[1];
@@ -2136,31 +2133,35 @@ export default function PulseApp() {
 
     // ── Check-in time ────────────────────────────────────────────────
     let checkInTime = "";
-    const ciTimeMatch = body.match(/check.?in\s+(?:starts?\s+)?at\s+(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
-    if (ciTimeMatch) checkInTime = ciTimeMatch[1];
+    const ciT = body.match(/check.?in\s+(?:starts?\s+)?at\s+(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+    if (ciT) checkInTime = ciT[1];
 
     // ── Check-out time ───────────────────────────────────────────────
     let checkOutTime = "";
-    const coTimeMatch = body.match(/check.?out\s+before\s+(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
-    if (coTimeMatch) checkOutTime = coTimeMatch[1];
+    const coT = body.match(/check.?out\s+before\s+(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+    if (coT) checkOutTime = coT[1];
 
     // ── Check-in date ────────────────────────────────────────────────
     let date = "";
-    // Pattern A: "Thu, May 7 - Sat, May 9" explicit date range in body — first date is check-in
-    // Must have day-of-week prefix to be reliable
-    const rangeMatch = body.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)\s*[-–]\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i);
-    if (rangeMatch) date = parseDate(rangeMatch[1]);
-    // Pattern B: "Check-in starts at 3:00 PM\nThu, May 7" — date on the line AFTER check-in label
+    // A: "Thu, May 7 - Sat, May 9" date range with day-of-week
+    const rA = body.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)\s*[-–]\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i);
+    if (rA) date = parseDate(rA[1]);
+    // B: "Check-in starts at 3:00 PM\nThu, May 7" — next line has day-of-week + date
     if (!date) {
       const m = body.match(/check.?in[^\n]*\n\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
       if (m) date = parseDate(m[1]);
     }
-    // Pattern C: inline "Check-in: Thu, May 7" or "Arrival: May 7, 2026"
+    // C: "Check-in starts at 3:00 PM Thu, May 7" — HTML-stripped, all on one line
     if (!date) {
-      const m = body.match(/(?:check.?in|arrival)\s*[:\-]?\s*(?:starts?\s*(?:at\s*[\d:apm]+)?\s*)?(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+      const m = body.match(/check.?in\s+(?:starts?\s+at\s+[\d:apm]+\s+)?((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
       if (m) date = parseDate(m[1]);
     }
-    // Pattern D: ISO date
+    // D: inline "Check-in: Thu, May 7, 2026"
+    if (!date) {
+      const m = body.match(/(?:check.?in|arrival)\s*[:\-]?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+      if (m) date = parseDate(m[1]);
+    }
+    // E: ISO date
     if (!date) {
       const m = body.match(/(\d{4}-\d{2}-\d{2})/);
       if (m) date = m[1];
@@ -2168,72 +2169,64 @@ export default function PulseApp() {
 
     // ── Check-out date ───────────────────────────────────────────────
     let checkOut = "";
-    // Pattern A: "Check-out before 11:00 AM\nSat, May 9" — date on line AFTER check-out label
-    const coBlockMatch = body.match(/check.?out[^\n]*\n\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
-    if (coBlockMatch) checkOut = parseDate(coBlockMatch[1]);
-    // Pattern B: date range second date "Thu, May 7 - Sat, May 9"
+    // A: "Check-out before 11:00 AM\nSat, May 9" — next line has day-of-week + date
+    const coA = body.match(/check.?out[^\n]*\n\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+    if (coA) checkOut = parseDate(coA[1]);
+    // B: date range second date "Thu, May 7 - Sat, May 9"
     if (!checkOut) {
       const m = body.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?\s*[-–]\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
       if (m) checkOut = parseDate(m[1]);
     }
-    // Pattern C: inline check-out keyword
+    // C: "Check-out before 11:00 AM Thu, May 9" — HTML-stripped, all on one line
     if (!checkOut) {
-      const m = body.match(/(?:check.?out|departure)\s*[:\-]?\s*(?:before\s*[\d:apm]+\s*)?(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+      const m = body.match(/check.?out\s+(?:before\s+[\d:apm]+\s+)?((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
+      if (m) checkOut = parseDate(m[1]);
+    }
+    // D: inline "Check-out: Sat, May 9, 2026"
+    if (!checkOut) {
+      const m = body.match(/(?:check.?out|departure)\s*[:\-]?\s*(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i);
       if (m) checkOut = parseDate(m[1]);
     }
 
     // ── Hotel / venue name ───────────────────────────────────────────
-    // Strip common subject prefixes first
-    const cleanSubject = subject
-      .replace(/^(Fwd?:|Re:|Fw:|Notification:|Alert:)\s*/i, "")
-      .replace(/\s+/g, " ").trim();
-
-    let name = cleanSubject.slice(0, 100);
+    const cleanSubject = subject.replace(/^(Fwd?:|Re:|Fw:|Notification:|Alert:)\s*/i,"").replace(/\s+/g," ").trim();
+    let name = cleanSubject.slice(0,100);
     if (type === "🏨 Hotel") {
-      // Extract hotel name from subject patterns:
-      // "Your Reservation at <NAME> in <City> is Confirmed"
-      // "Stay at <NAME> @ Thu"  (Notification style)
-      // "Booking Confirmed: <NAME>"
-      const subjMatch =
+      const sm =
         cleanSubject.match(/(?:reservation at|stay at|booking at|confirmed at|staying at)\s+(.+?)(?:\s+in\s+[A-Z][a-z]+|\s+is\s+(?:confirmed|complete)|(?:\s*@\s*\w+)?$)/i) ||
         cleanSubject.match(/(?:booking confirmed|confirmed):\s*(.+?)(?:\s+in\s+[A-Z][a-z]+|$)/i) ||
         cleanSubject.match(/^(.+?(?:Inn|Hotel|Suites?|Resort|Lodge|Motel|Radisson|Marriott|Hilton|Hyatt|Sheraton|Hampton|Courtyard|Country Inn|Best Western|Comfort|Wyndham|Holiday Inn).+?)(?:\s+in\s+|\s+is\s+|,\s*[A-Z][a-z]+\s*$|$)/i);
-      if (subjMatch) {
-        // Remove trailing "@ Thu" or "@ May 7" artifacts from notification emails
-        name = subjMatch[1].trim().replace(/\s*@\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun).*$/i, "").trim().slice(0, 100);
+      if (sm) {
+        name = sm[1].trim().replace(/\s*@\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun).*$/i,"").trim().slice(0,100);
       } else {
-        // Fallback: first line in body that looks like a hotel name
-        const bodyLine = body.match(/^([A-Z][^\n]{5,80}(?:Inn|Hotel|Suites?|Resort|Lodge|Motel|Radisson|Marriott|Hilton|Hyatt|Sheraton|Hampton|Courtyard|Country Inn|Best Western|Comfort|Wyndham|Holiday Inn)[^\n]{0,60})$/im);
-        if (bodyLine) name = bodyLine[1].trim().slice(0, 100);
-        else name = cleanSubject.slice(0, 100);
+        const bl = body.match(/^([A-Z][^\n]{5,80}(?:Inn|Hotel|Suites?|Resort|Lodge|Motel|Radisson|Marriott|Hilton|Hyatt|Sheraton|Hampton|Courtyard|Country Inn|Best Western|Comfort|Wyndham|Holiday Inn)[^\n]{0,60})$/im);
+        if (bl) name = bl[1].trim().slice(0,100);
       }
     }
 
     // ── Address ──────────────────────────────────────────────────────
     let address = "";
-    // Priority 1: "Address\n630 Donaldson Highway, Erlanger, KY 41018, USA" (Radisson style)
-    const addrBlockMatch = body.match(/\baddress\b\s*[\r\n]+\s*([^\n]{10,150})/i);
-    if (addrBlockMatch) address = addrBlockMatch[1].trim().slice(0, 150);
-    // Priority 2: inline "Address: 630 Donaldson..."
+    // P1: "Address\n630 Donaldson Highway..." (Radisson: label on one line, value on next)
+    const adA = body.match(/\baddress\b\s*[\r\n]+\s*([^\n]{10,150})/i);
+    if (adA) address = adA[1].trim().slice(0,150);
+    // P2: inline "Address: 630 Donaldson..."
     if (!address) {
-      const m = body.match(/\baddress\b\s*[:\-]\s*([^\n]{10,150})/i);
-      if (m) address = m[1].trim().slice(0, 150);
+      const m = body.match(/\baddress\b\s*[:\- ]\s*([^\n]{10,150})/i);
+      if (m) address = m[1].trim().slice(0,150);
     }
-    // Priority 3: street number pattern "630 Donaldson Highway, Erlanger, KY 41018"
+    // P3: street number pattern
     if (!address) {
       const m = body.match(/(\d{2,5}\s+[A-Za-z][^\n,]{5,60}(?:,\s*[A-Za-z][^\n]{3,60}){1,4})/);
-      if (m) address = m[1].trim().slice(0, 150);
+      if (m) address = m[1].trim().slice(0,150);
     }
 
     // ── Notes ────────────────────────────────────────────────────────
     let notes = "";
     if (type === "✈️ Flight") {
-      const routeMatch = body.match(/([A-Z]{3})\s*(?:→|->|to)\s*([A-Z]{3})/i);
-      if (routeMatch) notes = `${routeMatch[1].toUpperCase()} → ${routeMatch[2].toUpperCase()}`;
+      const rm = body.match(/([A-Z]{3})\s*(?:→|->|to)\s*([A-Z]{3})/i);
+      if (rm) notes = `${rm[1].toUpperCase()} → ${rm[2].toUpperCase()}`;
     }
-    if (type === "🏨 Hotel" && checkOut) {
-      notes = `Check-out: ${checkOut}`;
-    }
+    if (type === "🏨 Hotel" && checkOut) notes = `Check-out: ${checkOut}`;
 
     const time = checkInTime || "";
     return { name, date, confirmNo, address, notes, checkOut, time, checkInTime, checkOutTime };
@@ -2324,10 +2317,7 @@ export default function PulseApp() {
             console.log(`[RESV] Subject: "${subject.slice(0,60)}" → type: ${type||"SKIP"}`);
             if (!type) continue;
 
-            // DEBUG: log raw body to console
-            console.log(`[RESV-BODY]`, JSON.stringify(body.slice(0,1200)));
             const { name, date, confirmNo, address, notes, checkOut, time: parsedTime, checkInTime, checkOutTime } = extractResvFields(subject, body, type);
-            console.log(`[RESV-PARSED] name="${name}" confirmNo="${confirmNo}" date="${date}" checkOut="${checkOut}" addr="${address.slice(0,50)}"`);
             // Use email date as fallback only for non-hotel types (hotels must have a check-in date)
             const fallbackDate = dateHdr ? new Date(dateHdr).toISOString().split("T")[0] : "";
             const finalDate = date || (type !== "🏨 Hotel" ? fallbackDate : "");
@@ -2465,6 +2455,19 @@ export default function PulseApp() {
           try { await fetch(`${RESV_URL}/${encodeURIComponent(bad.id)}.json`, { method:"DELETE" }); } catch(e) {}
         }
         const validItems = allItems.filter(i => i.name && validTypes.includes(i.type));
+        // One-time cleanup: for hotel items missing checkOut, clear googleId so they get re-parsed on next sync
+        for (const item of validItems) {
+          if (item.type === "🏨 Hotel" && !item.checkOut && item.googleId && item.id) {
+            try {
+              await fetch(`${RESV_URL}/${encodeURIComponent(item.id)}.json`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ googleId: null, checkInTime: null, checkOutTime: null }),
+              });
+              item.googleId = null; // so it gets re-parsed
+            } catch(e) {}
+          }
+        }
         // Deduplicate by googleId AND by confirmNo (same booking from 2 different emails)
         const seenGoogleIds = new Set();
         const seenConfirmNos = new Set();
