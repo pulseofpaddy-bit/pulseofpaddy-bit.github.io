@@ -1528,41 +1528,63 @@ export default function PulseApp() {
 
   function apptExtractFields(subject, body) {
     const clean = body.replace(/\s+/g," ");
-    // Doctor name
+    const combined = (subject + " " + body).replace(/\s+/g," ");
+    // ── Doctor name ──
     let doctorName = "";
-    const drMatch = clean.match(/(?:Dr\.?|Doctor)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/);
+    const drMatch = combined.match(/(?:Dr\.?|Doctor)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/);
     if (drMatch) doctorName = "Dr. " + drMatch[1].trim();
-    // Date
+    // ── Date ── (try many patterns in priority order)
     let date = "";
     const datePatterns = [
-      /(?:appointment|visit|scheduled|date)\s*[:\-]?\s*(\w+ \d{1,2},?\s*\d{4})/i,
-      /(?:appointment|visit|scheduled|date)\s*[:\-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+      // "Monday, June 10, 2026" or "Mon, Jun 10, 2026"
+      /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*\d{4})/i,
+      // "June 10, 2026" or "Jun 10 2026"
+      /((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*\d{4})/i,
+      // "appointment on June 10" or "scheduled for June 10"
+      /(?:appointment|visit|scheduled|confirmed|on|for)\s+(?:on\s+)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*(?:\d{4})?)/i,
+      // ISO date
       /(\d{4}-\d{2}-\d{2})/,
-      /(\w+day,?\s+\w+ \d{1,2},?\s*\d{4})/i,
-      /(\w+ \d{1,2},?\s*\d{4})/i,
+      // MM/DD/YYYY or MM-DD-YYYY
+      /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})/,
+      // "Date: June 10" or "Date: 06/10/2026"
+      /(?:date|scheduled|appointment)\s*[:\-]\s*([\w\s,\/\-]{6,25})/i,
     ];
-    for (const p of datePatterns) { const m = clean.match(p); if (m) { const d = new Date(m[1]); if (!isNaN(d)) { date = d.toISOString().split("T")[0]; break; } } }
-    // Time
+    for (const p of datePatterns) {
+      const m = combined.match(p);
+      if (m) {
+        const d = new Date(m[1]);
+        if (!isNaN(d) && d.getFullYear() >= 2020 && d.getFullYear() <= 2030) {
+          date = d.toISOString().split("T")[0];
+          break;
+        }
+      }
+    }
+    // ── Time ──
     let time = "";
-    const timeMatch = clean.match(/(?:at|time|@)\s*(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)/i) || clean.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+    const timeMatch =
+      combined.match(/(?:at|time|@|scheduled for)\s*(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))/i) ||
+      combined.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
     if (timeMatch) {
       const raw = timeMatch[1].trim().toUpperCase();
-      const [hm, ampm] = raw.split(/\s+/);
-      const [h, min] = hm.split(":").map(Number);
+      const parts = raw.split(/\s+/);
+      const [h, min] = parts[0].split(":").map(Number);
+      const ampm = parts[1] || "";
       if (ampm === "PM" && h < 12) time = `${h+12}:${String(min).padStart(2,"0")}`;
       else if (ampm === "AM" && h === 12) time = `00:${String(min).padStart(2,"0")}`;
       else time = `${String(h).padStart(2,"0")}:${String(min).padStart(2,"0")}`;
     }
-    // Address
+    // ── Address ──
     let address = "";
-    const addrMatch = clean.match(/(?:address|location|clinic|office|hospital|at)\s*[:\-]?\s*(\d+[^\n,]{8,80})/i);
+    const addrMatch =
+      combined.match(/(?:address|location|office|clinic|hospital)\s*[:\-]?\s*(\d+[^\n,]{8,80})/i) ||
+      combined.match(/(\d{2,5}\s+[A-Za-z][^\n,]{5,60}(?:,\s*[A-Za-z][^\n]{3,40}){1,3})/);
     if (addrMatch) address = addrMatch[1].trim().slice(0,80);
-    // Patient name (for member matching)
+    // ── Patient name ──
     let patient = "";
-    const patientMatch = clean.match(/(?:patient|for|name)\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/);
+    const patientMatch = combined.match(/(?:patient|for|dear)\s*[:\-]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/);
     if (patientMatch) patient = patientMatch[1].trim();
-
-    return { doctorName, date, time, address, patient, name: subject.replace(/^(Fwd:|Re:|Fw:)\s*/i,"").replace(/\s+/g," ").trim().slice(0,80) };
+    const name = subject.replace(/^(Fwd:|Re:|Fw:|Reminder:|Confirmation:)\s*/i,"").replace(/\s+/g," ").trim().slice(0,80);
+    return { doctorName, date, time, address, patient, name };
   }
 
   function apptMatchMember(patient, email) {
@@ -1581,19 +1603,39 @@ export default function PulseApp() {
     let imported = 0;
 
     const QUERIES = [
-      // Simple subject: queries that Gmail API reliably supports
+      // Appointment confirmations & reminders
       'subject:appointment newer_than:365d',
+      'subject:"appointment confirmation" newer_than:365d',
+      'subject:"appointment reminder" newer_than:365d',
+      'subject:"your appointment" newer_than:365d',
+      'subject:"upcoming appointment" newer_than:365d',
+      'subject:"appointment scheduled" newer_than:365d',
+      // Doctor / visit confirmations
       'subject:doctor newer_than:365d',
+      'subject:"your visit" newer_than:365d',
+      'subject:"upcoming visit" newer_than:365d',
+      'subject:"visit confirmation" newer_than:365d',
+      'subject:"confirmed" subject:"dr." newer_than:365d',
+      // Dental
       'subject:dental newer_than:365d',
       'subject:dentist newer_than:365d',
+      // Clinic / medical
       'subject:clinic newer_than:365d',
+      'subject:"patient portal" newer_than:365d',
+      'subject:"medical appointment" newer_than:365d',
+      'subject:"health appointment" newer_than:365d',
+      // Lab / results
       'subject:"lab results" newer_than:365d',
+      'subject:"test results" newer_than:365d',
+      'subject:"blood work" newer_than:365d',
+      'subject:"lab report" newer_than:365d',
+      // Specialist / other
       'subject:"check-up" newer_than:365d',
       'subject:vaccination newer_than:365d',
       'subject:"eye exam" newer_than:365d',
       'subject:prescription newer_than:365d',
-      'subject:"test results" newer_than:365d',
-      'subject:"blood work" newer_than:365d',
+      'subject:"specialist" newer_than:365d',
+      'subject:"referral" newer_than:365d',
     ];
 
     try {
@@ -1658,6 +1700,14 @@ export default function PulseApp() {
         }
       }
 
+      // ─── Save Gmail results to Drive immediately ────────────────────
+      if (imported > 0 && fwWorkspace?.fileIds?.appointments && fwToken) {
+        try {
+          const latest = JSON.parse(localStorage.getItem("pulse_appointments") || "[]");
+          await fwWriteFile(fwWorkspace.fileIds.appointments, latest, fwToken);
+          console.log("[Appt] Gmail sync saved to Drive:", imported, "items");
+        } catch(e) { console.warn("[Appt] Drive save after Gmail failed:", e); }
+      }
       // ─── GOOGLE CALENDAR SYNC ────────────────────────────────────────
       setApptSyncMsg("📅 Scanning Google Calendar…");
       try {
@@ -1668,12 +1718,9 @@ export default function PulseApp() {
           { headers: { Authorization: `Bearer ${fwToken}` } }
         );
         if (!calRes.ok) {
-          const errText = await calRes.text().catch(() => calRes.status);
+          const errText = await calRes.text().catch(() => String(calRes.status));
           console.warn("Calendar API error:", calRes.status, errText);
-          setApptSyncMsg(`⚠️ Calendar: HTTP ${calRes.status} — sign out & sign in again`);
-          setApptSyncing(false);
-          setTimeout(() => setApptSyncMsg(""), 8000);
-          return;
+          // Don't abort — just skip Calendar and show Gmail results
         } else {
           const calData = await calRes.json();
           const totalEvents = (calData.items || []).length;
