@@ -25,6 +25,10 @@
         "pingmeMigrated": {
           ".read": "auth != null && root.child('households').child($householdId).child('members').child(auth.uid).exists()",
           ".write": "auth != null && root.child('households').child($householdId).child('members').child(auth.uid).exists()"
+        },
+        "health": {
+          ".read": "auth != null && (root.child('households').child($householdId).child('members').child(auth.uid).child('gender').val() == 'girl' || (root.child('households').child($householdId).child('members').child(auth.uid).child('gender').val() == 'female' && (root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'head' || root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'spouse' || root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'child' || root.child('households').child($householdId).child('members').child(auth.uid).child('role').val() == 'head')))",
+          ".write": "auth != null && (root.child('households').child($householdId).child('members').child(auth.uid).child('gender').val() == 'girl' || (root.child('households').child($householdId).child('members').child(auth.uid).child('gender').val() == 'female' && (root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'head' || root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'spouse' || root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'child' || root.child('households').child($householdId).child('members').child(auth.uid).child('role').val() == 'head')))"
         }
       }
     },
