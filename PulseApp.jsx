@@ -1,4 +1,24 @@
 import { useState, useEffect, useRef } from "react";
+import { calendarDateFromText, parseDate } from "./src/dates.js";
+import { checkIsOpen } from "./src/openingHours.js";
+
+// Firebase REST replies with HTTP 401 and `{error:"Permission denied"}` when
+// rules reject the caller. That object must not be stored as list data.
+async function fbGet(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Firebase HTTP ${res.status}`);
+  const data = await res.json();
+  if (
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    typeof data.error === "string" &&
+    Object.keys(data).length === 1
+  ) {
+    throw new Error(data.error);
+  }
+  return data;
+}
 
 // ─── CONFIG ────────────────────────────────────────
 
@@ -1308,8 +1328,7 @@ export default function PulseApp() {
     try {
       const url = fbUrl || GROCERY_FB;
       if (url && !url.includes("undefined")) {
-        const res = await fetch(`${url}.json`);
-        const data = await res.json();
+        const data = await fbGet(`${url}.json`);
         if (data && typeof data === "object") {
           const fbItems = Object.entries(data)
             .map(([id, val]) => ({ fbId: id, ...val }))
@@ -1552,9 +1571,9 @@ export default function PulseApp() {
     for (const p of datePatterns) {
       const m = combined.match(p);
       if (m) {
-        const d = new Date(m[1]);
-        if (!isNaN(d) && d.getFullYear() >= 2020 && d.getFullYear() <= 2030) {
-          date = d.toISOString().split("T")[0];
+        const found = calendarDateFromText(m[1]);
+        if (found) {
+          date = found;
           break;
         }
       }
@@ -2139,15 +2158,6 @@ export default function PulseApp() {
     return null; // unrecognised — skip
   }
 
-  function parseDate(str) {
-    if (!str) return "";
-    let ds = str.trim();
-    // Remove leading day-of-week like "Thu, " or "Thu "
-    ds = ds.replace(/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*/i, "");
-    if (!/\d{4}/.test(ds)) ds += " " + new Date().getFullYear();
-    const d = new Date(ds);
-    return isNaN(d) ? "" : d.toISOString().split("T")[0];
-  }
   function extractResvFields(subject, body, type) {
     // Blocklist: words that appear near "confirmation" but are NOT a conf number
     const CONF_BLOCKLIST = /^(FORWARDING|CONFIRMED|RESERVATION|BOOKING|NUMBER|HOTEL|FLIGHT|EMAIL|PLEASE|MANAGE|CANCEL|MODIFY|POLICY|CONTACT|SUPPORT|DETAILS|RECEIPT|PAYMENT|AMOUNT|TOTAL|PRICE|RATE|ROOM|NIGHT|NIGHTS|GUEST|GUESTS|CHECK|STAY|DATE|TIME|ARRIVAL|DEPART|YOUR|THIS|THAT|WITH|FROM|HAVE|BEEN|WILL|THANK|HELLO|DEAR|SINCERELY|REGARDS|TEAM|STAFF|SERVICE|PROPERTY|LOCATION|ADDRESS|PHONE|CITY|STATE|ZIP|USA|INC|LLC|LTD)$/i;
@@ -2491,8 +2501,7 @@ export default function PulseApp() {
   async function loadResvs() {
     setResvLoading(true);
     try {
-      const res = await fetch(`${RESV_URL}.json`);
-      const data = await res.json();
+      const data = await fbGet(`${RESV_URL}.json`);
       if (data) {
         const validTypes = RESV_TYPES.map(t => t.id);
         const allItems = Object.entries(data).map(([id, val]) => ({ id, ...val }));
@@ -3302,8 +3311,7 @@ export default function PulseApp() {
   async function loadClothing() {
     setClothingLoading(true);
     try {
-      const res = await fetch(`${CLOTHING_URL}.json`);
-      const data = await res.json();
+      const data = await fbGet(`${CLOTHING_URL}.json`);
       if (data) {
         const items = Object.entries(data).map(([id, val]) => ({ id, ...val }));
         setClothingItems(items);
@@ -4679,78 +4687,6 @@ export default function PulseApp() {
       setRestaurantError("Could not fetch restaurants. Check your connection and try again.");
       setRestaurantLoading(false);
     }
-  }
-
-  // ─── Opening hours parser ────────────────────────────────────────
-  // Parses a subset of the OSM opening_hours spec:
-  //   "Mo-Fr 11:00-22:00; Sa-Su 12:00-23:00"
-  //   "24/7"
-  //   "Mo-Su 09:00-21:00"
-  // Returns: true (open), false (closed), or null (unknown)
-  function checkIsOpen(ohStr) {
-    if (!ohStr || ohStr === 'Hours not listed') return null;
-    const s = ohStr.trim();
-    if (s === '24/7' || s === 'open') return true;
-    if (s === 'closed') return false;
-
-    const now = new Date();
-    const dayIdx = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const dayNames = ['su','mo','tu','we','th','fr','sa'];
-    const curDay = dayNames[dayIdx];
-    const curMins = now.getHours() * 60 + now.getMinutes();
-
-    const parseMins = (t) => {
-      const [h, m] = t.split(':').map(Number);
-      return h * 60 + (m || 0);
-    };
-
-    const dayAbbrs = { mo:0, tu:1, we:2, th:3, fr:4, sa:5, su:6 };
-    // Expand a day range like "mo-fr" to array of day abbrs
-    const expandDays = (spec) => {
-      spec = spec.toLowerCase().trim();
-      if (spec.includes('-')) {
-        const [from, to] = spec.split('-').map(d => d.trim());
-        const fi = dayAbbrs[from], ti = dayAbbrs[to];
-        if (fi === undefined || ti === undefined) return [];
-        const days = [];
-        // Handle wrap-around (e.g. sa-su)
-        let i = fi;
-        while (true) {
-          days.push(dayNames[i]);
-          if (i === ti) break;
-          i = (i + 1) % 7;
-          if (days.length > 7) break; // safety
-        }
-        return days;
-      }
-      return [spec];
-    };
-
-    // Split into rules by ";"
-    const rules = s.split(';').map(r => r.trim()).filter(Boolean);
-    for (const rule of rules) {
-      // Match: [day spec] HH:MM-HH:MM
-      const m = rule.match(/^([a-zA-Z,\-]+)?\s*(\d{1,2}:\d{2})\s*[-→]\s*(\d{1,2}:\d{2})/);
-      if (!m) continue;
-      const daySpec = m[1] ? m[1].trim() : 'mo-su';
-      const open = parseMins(m[2]);
-      const close = parseMins(m[3]);
-
-      // Expand comma-separated day groups e.g. "Mo-Fr,Sa"
-      const dayGroups = daySpec.split(',').map(d => d.trim());
-      const applicableDays = dayGroups.flatMap(g => expandDays(g));
-
-      if (applicableDays.includes(curDay)) {
-        // Overnight hours: e.g. 22:00-02:00
-        if (close < open) {
-          if (curMins >= open || curMins < close) return true;
-        } else {
-          if (curMins >= open && curMins < close) return true;
-        }
-        return false; // Day matches but outside hours
-      }
-    }
-    return false; // No matching rule found for today
   }
 
   function parseAndSet(elements, userLat, userLng) {
