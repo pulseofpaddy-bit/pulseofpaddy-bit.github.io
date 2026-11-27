@@ -190,7 +190,7 @@ export function installRtdbFetch() {
   };
 }
 
-export async function registerHouseholdMember({ householdId, email, role }) {
+export async function registerHouseholdMember({ householdId, email, role, gender, relation }) {
   const uid = firebaseUid();
   if (!householdId || !uid || !email) return false;
   const res = await fetch(`${RTDB_ROOT}/households/${householdId}/members/${uid}.json`, {
@@ -199,6 +199,8 @@ export async function registerHouseholdMember({ householdId, email, role }) {
     body: JSON.stringify({
       email,
       role: role || "member",
+      gender: gender || "",
+      relation: relation || "",
       uid,
       updatedAt: Date.now(),
     }),

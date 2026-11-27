@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { calendarDateFromText, parseDate } from "./src/dates.js";
 import { checkIsOpen } from "./src/openingHours.js";
-import { folderKey, pingCollection, setHouseholdId } from "./src/rtdbPaths.js";
+import { folderKey, healthCollection, pingCollection, setHouseholdId } from "./src/rtdbPaths.js";
+import { canViewHealthLogs, inferRelation } from "./src/healthAccess.js";
 import {
   claimLegacyHousehold,
   clearFirebaseSession,
@@ -147,7 +148,7 @@ const OTT_CATEGORIES = [
 const FAMILY_CLIENT_ID   = "360320151404-1miklman0sr6gends9nuuuggecauneea.apps.googleusercontent.com";
 const FAMILY_SCOPES      = "openid https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.readonly";
 const WORKSPACE_FOLDER   = "PulseApp_Workspace";
-const WORKSPACE_FILES    = { grocery:"Grocery.json", todos:"Todo.json", appointments:"Appointments.json", members:"Members.json", periods:"Periods.json", pregnancy:"Pregnancy.json", contacts:"Contacts.json", payReminders:"PayReminders.json", moneyLent:"MoneyLent.json" };
+const WORKSPACE_FILES    = { grocery:"Grocery.json", todos:"Todo.json", appointments:"Appointments.json", members:"Members.json", contacts:"Contacts.json", payReminders:"PayReminders.json", moneyLent:"MoneyLent.json" };
 
 // ─── PINGME CONFIG ────────────────────────────────────────
 // Chat URLs are built per household in pingFetch (src/rtdbPaths.js).
@@ -634,6 +635,7 @@ export default function PulseApp() {
   const [fwInviteName, setFwInviteName] = useState("");
   const [fwInviteError, setFwInviteError] = useState("");
   const [fwInviteGender, setFwInviteGender] = useState("");
+  const [fwInviteRelation, setFwInviteRelation] = useState("");
   const [firebaseNotice, setFirebaseNotice] = useState("");
   const [fbSession, setFbSession] = useState(0);
   const activeHouseholdId = fwSharedFolderKey || (fwWorkspace?.folderId ? folderKey(fwWorkspace.folderId) : "");
@@ -713,10 +715,13 @@ export default function PulseApp() {
     (async () => {
       const token = await getFirebaseIdToken();
       if (!token || cancel) return;
+      const meNow = (fwMembers || []).find(m => m.email === fwUser.email);
       await registerHouseholdMember({
         householdId: activeHouseholdId,
         email: firebaseEmail() || fwUser.email,
-        role: fwRole || "member",
+        role: meNow?.role || fwRole || "member",
+        gender: meNow?.gender || "",
+        relation: inferRelation({ ...(meNow || {}), role: meNow?.role || fwRole }),
       });
       if ((fwRole || "") === "head") await claimLegacyHousehold(activeHouseholdId);
       await migrateLegacyPingme(activeHouseholdId);
@@ -725,7 +730,7 @@ export default function PulseApp() {
       }
     })();
     return () => { cancel = true; };
-  }, [fwUser?.email, activeHouseholdId, fwRole, fbSession]);
+  }, [fwUser?.email, activeHouseholdId, fwRole, fbSession, fwMembers]);
 
   // ─── ONBOARDING STATE ────────────────────────────────────────
   // Steps: "splash" → "role" → "add_members" → done (null)
@@ -752,6 +757,7 @@ export default function PulseApp() {
   const [onboardingAddEmails, setOnboardingAddEmails] = useState([""]);
   const [onboardingAddNames, setOnboardingAddNames] = useState([""]);
   const [onboardingAddGenders, setOnboardingAddGenders] = useState([""]);
+  const [onboardingAddRelations, setOnboardingAddRelations] = useState([""]);
   const [onboardingInviting, setOnboardingInviting] = useState(false);
   const [onboardingMemberError, setOnboardingMemberError] = useState("");
   const [onboardingGender, setOnboardingGender] = useState(() => {
@@ -3205,7 +3211,13 @@ export default function PulseApp() {
 
   // ─── PERIOD CALENDAR STATE ────────────────────────────────────────
   const [pcPeriods, setPcPeriods] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("pulse_pc_periods") || "[]"); } catch { return []; }
+    try {
+      const user = JSON.parse(localStorage.getItem("pulse_fw_user") || "null");
+      const members = JSON.parse(localStorage.getItem("pulse_fw_members_cache") || "[]");
+      const me = (members || []).find(m => m.email === user?.email);
+      if (!canViewHealthLogs(me)) return [];
+      return JSON.parse(localStorage.getItem("pulse_pc_periods") || "[]");
+    } catch { return []; }
   });
   const [pcCycleLength, setPcCycleLength] = useState(() => parseInt(localStorage.getItem("pulse_pc_cycle") || "28", 10));
   const [pcPeriodLength, setPcPeriodLength] = useState(() => parseInt(localStorage.getItem("pulse_pc_period_len") || "5", 10));
@@ -3220,7 +3232,13 @@ export default function PulseApp() {
   const [pcFlow, setPcFlow] = useState("");
   const [pcLogType, setPcLogType] = useState("period"); // period|missed|discharge_only
   const [pcPregnancy, setPcPregnancy] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("pulse_pc_pregnancy") || "null"); } catch { return null; }
+    try {
+      const user = JSON.parse(localStorage.getItem("pulse_fw_user") || "null");
+      const members = JSON.parse(localStorage.getItem("pulse_fw_members_cache") || "[]");
+      const me = (members || []).find(m => m.email === user?.email);
+      if (!canViewHealthLogs(me)) return null;
+      return JSON.parse(localStorage.getItem("pulse_pc_pregnancy") || "null");
+    } catch { return null; }
   });
   const [pcShowPregnancyModal, setPcShowPregnancyModal] = useState(false);
   const [pcTestResult, setPcTestResult] = useState(""); // positive|negative
@@ -3233,18 +3251,19 @@ export default function PulseApp() {
   const PC_FLOW = [{id:"light",label:"Light",emoji:"💧"},{id:"medium",label:"Medium",emoji:"💧💧"},{id:"heavy",label:"Heavy",emoji:"💧💧💧"},{id:"spotting",label:"Spotting",emoji:"·"}];
 
   function pcSavePeriods(updated) {
+    const me = (fwMembers || []).find(m => m.email === fwUser?.email);
+    if (!canViewHealthLogs(me)) return;
     setPcPeriods(updated);
     localStorage.setItem("pulse_pc_periods", JSON.stringify(updated));
-    // Sync to Google Drive
-    if (fwWorkspace?.fileIds?.periods && fwToken) {
-      fwWriteFile(fwWorkspace.fileIds.periods, updated, fwToken).catch(()=>{});
-    }
+    const url = healthCollection("periods");
+    if (url) fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updated) }).catch(() => {});
   }
 
   function pcSavePregnancyDrive(data) {
-    if (fwWorkspace?.fileIds?.pregnancy && fwToken) {
-      fwWriteFile(fwWorkspace.fileIds.pregnancy, data ? [data] : [], fwToken).catch(()=>{});
-    }
+    const me = (fwMembers || []).find(m => m.email === fwUser?.email);
+    if (!canViewHealthLogs(me)) return;
+    const url = healthCollection("pregnancy");
+    if (url) fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data ? [data] : []) }).catch(() => {});
   }
 
   function pcLogPeriod() {
@@ -3919,24 +3938,95 @@ export default function PulseApp() {
     }
   }, [fwWorkspace, fwToken]);
 
-  // Load Period Calendar data from Drive when workspace is available
+  // Period and pregnancy logs live in a private household path. Shared Drive copies are read once and left in place.
   useEffect(() => {
-    if (fwWorkspace?.fileIds?.periods && fwToken) {
-      fwReadFile(fwWorkspace.fileIds.periods, fwToken).then(data => {
-        if (Array.isArray(data) && data.length > 0) {
+    if (!fwMembers.length) return;
+    const me = fwMembers.find(m => m.email === fwUser?.email);
+    if (!canViewHealthLogs(me)) {
+      setPcPeriods([]);
+      setPcPregnancy(null);
+      localStorage.removeItem("pulse_pc_periods");
+      localStorage.removeItem("pulse_pc_pregnancy");
+      return;
+    }
+    let cancel = false;
+    (async () => {
+      const periodsUrl = healthCollection("periods");
+      const pregnancyUrl = healthCollection("pregnancy");
+      const migratedUrl = healthCollection("migrated");
+      if (!periodsUrl || !fwToken) return;
+      const flagRes = await fetch(migratedUrl);
+      const alreadyCopied = flagRes.ok && (await flagRes.json()) === true;
+      if (!alreadyCopied && fwWorkspace?.folderId) {
+        const copied = await copySharedHealthFiles(fwWorkspace.folderId, fwToken, periodsUrl, pregnancyUrl);
+        if (copied && !cancel) {
+          await fetch(migratedUrl, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(true) });
+        }
+      }
+      const [periodsRes, pregnancyRes] = await Promise.all([fetch(periodsUrl), fetch(pregnancyUrl)]);
+      if (cancel) return;
+      if (periodsRes.ok) {
+        const data = await periodsRes.json();
+        if (Array.isArray(data)) {
           setPcPeriods(data);
           localStorage.setItem("pulse_pc_periods", JSON.stringify(data));
         }
-      });
-    }
-    if (fwWorkspace?.fileIds?.pregnancy && fwToken) {
-      fwReadFile(fwWorkspace.fileIds.pregnancy, fwToken).then(data => {
-        if (Array.isArray(data) && data.length > 0 && data[0]?.active) {
-          setPcPregnancy(data[0]);
-          localStorage.setItem("pulse_pc_pregnancy", JSON.stringify(data[0]));
+      }
+      if (pregnancyRes.ok) {
+        const data = await pregnancyRes.json();
+        const active = Array.isArray(data) ? data.find(row => row?.active) : (data?.active ? data : null);
+        if (active) {
+          setPcPregnancy(active);
+          localStorage.setItem("pulse_pc_pregnancy", JSON.stringify(active));
         }
+      }
+    })();
+    return () => { cancel = true; };
+  }, [fwMembers, fwUser?.email, activeHouseholdId, fwToken, fwWorkspace?.folderId]);
+
+  useEffect(() => {
+    if (mainTab !== "periodcal" || !fwMembers.length) return;
+    const me = fwMembers.find(m => m.email === fwUser?.email);
+    if (!canViewHealthLogs(me)) setMainTab(null);
+  }, [mainTab, fwMembers, fwUser?.email]);
+
+  async function copySharedHealthFiles(folderId, token, periodsUrl, pregnancyUrl) {
+    async function fileId(name) {
+      const q = encodeURIComponent(`'${folderId}' in parents and name='${name}' and trashed=false`);
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.files?.[0]?.id || null;
     }
+    const periodsId = await fileId("Periods.json");
+    const pregnancyId = await fileId("Pregnancy.json");
+    if (periodsId) {
+      const data = await fwReadFile(periodsId, token);
+      if (data === null) return false;
+      const existingRes = await fetch(periodsUrl);
+      const existing = existingRes.ok ? await existingRes.json() : null;
+      if ((!Array.isArray(existing) || existing.length === 0) && Array.isArray(data) && data.length) {
+        const saved = await fetch(periodsUrl, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+        if (!saved.ok) return false;
+      }
+    }
+    if (pregnancyId) {
+      const data = await fwReadFile(pregnancyId, token);
+      if (data === null) return false;
+      const existingRes = await fetch(pregnancyUrl);
+      const existing = existingRes.ok ? await existingRes.json() : null;
+      const empty = existing == null || (Array.isArray(existing) && existing.length === 0);
+      if (empty && Array.isArray(data) && data.length) {
+        const saved = await fetch(pregnancyUrl, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+        if (!saved.ok) return false;
+      }
+    }
+    return true;
+  }
+
+  useEffect(() => {
     if (fwWorkspace?.fileIds?.contacts && fwToken) {
       fwReadFile(fwWorkspace.fileIds.contacts, fwToken).then(data => {
         if (Array.isArray(data) && data.length > 0) {
@@ -4137,7 +4227,8 @@ export default function PulseApp() {
         current = fwMembers || [];
       }
       const alreadyIn = current.some(m => m.email === email);
-      const updated = alreadyIn ? current : [...current, { name, email, gender, role: "member", joinedAt: Date.now() }];
+      const relation = fwInviteRelation || inferRelation({ gender, role: "member" });
+      const updated = alreadyIn ? current : [...current, { name, email, gender, relation, role: "member", joinedAt: Date.now() }];
       if (!alreadyIn) {
         // Try to write to Drive, but don't fail if it doesn't work
         await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken).catch(() => {});
@@ -4214,13 +4305,13 @@ export default function PulseApp() {
       const members = Array.isArray(rawMembers) ? rawMembers : [];
       const alreadyIn = members.some(m => m.email === fwUser.email);
       if (!alreadyIn) {
-        const updated = [...members, { name: fwUser.name, email: fwUser.email, gender: onboardingGender, role, joinedAt: Date.now(), photo: fwUser.photo }];
+        const updated = [...members, { name: fwUser.name, email: fwUser.email, gender: onboardingGender, role, relation: role === "head" ? "head" : inferRelation({ role, gender: onboardingGender }), joinedAt: Date.now(), photo: fwUser.photo }];
         await fwWriteFile(ws.fileIds.members, updated, fwToken);
         setFwMembers(fwCleanMembers(updated));
         localStorage.setItem("pulse_fw_members_cache", JSON.stringify(fwCleanMembers(updated)));
       } else {
         // Update role and gender
-        const updated = members.map(m => m.email === fwUser.email ? { ...m, role, gender: onboardingGender || m.gender, name: fwUser.name, photo: fwUser.photo } : m);
+        const updated = members.map(m => m.email === fwUser.email ? { ...m, role, gender: onboardingGender || m.gender, relation: m.relation || (role === "head" ? "head" : inferRelation({ ...m, role, gender: onboardingGender || m.gender })), name: fwUser.name, photo: fwUser.photo } : m);
         await fwWriteFile(ws.fileIds.members, updated, fwToken);
         setFwMembers(fwCleanMembers(updated));
         localStorage.setItem("pulse_fw_members_cache", JSON.stringify(fwCleanMembers(updated)));
@@ -4263,10 +4354,11 @@ export default function PulseApp() {
       const email = validEmails[i].trim().toLowerCase();
       const name = (onboardingAddNames[origIdx] || "").trim() || email.split("@")[0];
       const gender = (onboardingAddGenders[origIdx] || "").trim();
+      const relation = onboardingAddRelations[origIdx] || inferRelation({ gender, role: "member" });
       await fwShareWorkspace(email, fwToken).catch(() => {});
       const current = await fwReadFile(fwWorkspace.fileIds.members, fwToken);
       if (!current.some(m => m.email === email)) {
-        const updated = [...current, { name, email, gender, role: "member", joinedAt: Date.now() }];
+        const updated = [...current, { name, email, gender, relation, role: "member", joinedAt: Date.now() }];
         await fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken);
         setFwMembers(updated);
       }
@@ -4914,14 +5006,19 @@ export default function PulseApp() {
                           style={{flex:1.5,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"12px 14px",fontSize:14,color:"#fff",outline:"none",fontFamily:"inherit"}}
                         />
                       </div>
-                      <div style={{display:"flex",gap:6,marginBottom:2}}>
+                      <div style={{display:"flex",gap:6,marginBottom:6}}>
                         {[{id:"male",label:"Male",emoji:"👨"},{id:"female",label:"Female",emoji:"👩"},{id:"boy",label:"Boy",emoji:"👦"},{id:"girl",label:"Girl",emoji:"👧"}].map(g=>(
                           <div key={g.id} onClick={()=>{const n=[...onboardingAddGenders];n[i]=g.id;setOnboardingAddGenders(n);}} style={{flex:1,padding:"8px 6px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",textAlign:"center",background:onboardingAddGenders[i]===g.id?"rgba(34,197,94,0.25)":"rgba(255,255,255,0.06)",border:`1px solid ${onboardingAddGenders[i]===g.id?"#22C55E":"rgba(255,255,255,0.1)"}`,color:onboardingAddGenders[i]===g.id?"#22C55E":"rgba(255,255,255,0.5)",transition:"all 0.15s"}}>{g.emoji} {g.label}</div>
                         ))}
                       </div>
+                      <div style={{display:"flex",gap:6,marginBottom:2}}>
+                        {[{id:"spouse",label:"Spouse"},{id:"child",label:"Child"}].map(r=>(
+                          <div key={r.id} onClick={()=>{const n=[...onboardingAddRelations];n[i]=r.id;setOnboardingAddRelations(n);}} style={{flex:1,padding:"8px 6px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",textAlign:"center",background:onboardingAddRelations[i]===r.id?"rgba(168,85,247,0.25)":"rgba(255,255,255,0.06)",border:`1px solid ${onboardingAddRelations[i]===r.id?"#A855F7":"rgba(255,255,255,0.1)"}`,color:onboardingAddRelations[i]===r.id?"#C4B5FD":"rgba(255,255,255,0.5)"}}>{r.label}</div>
+                        ))}
+                      </div>
                     </div>
                   ))}
-                  <div onClick={()=>{setOnboardingAddEmails(p=>[...p,""]);setOnboardingAddNames(p=>[...p,""]);setOnboardingAddGenders(p=>[...p,""]);}} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"10px 0",marginBottom:12}}>
+                  <div onClick={()=>{setOnboardingAddEmails(p=>[...p,""]);setOnboardingAddNames(p=>[...p,""]);setOnboardingAddGenders(p=>[...p,""]);setOnboardingAddRelations(p=>[...p,""]);}} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"10px 0",marginBottom:12}}>
                     <div style={{width:28,height:28,borderRadius:14,background:"rgba(34,197,94,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#22C55E"}}>+</div>
                     <span style={{fontSize:13,color:"#22C55E",fontWeight:600}}>Add another member</span>
                   </div>
@@ -5158,7 +5255,7 @@ export default function PulseApp() {
                     </div>
 
                     {/* Period Calendar — only for female members */}
-                    {(() => { const me = (fwMembers||[]).find(m=>m.email===fwUser?.email); return me?.gender === "female"; })() && (
+                    {canViewHealthLogs((fwMembers||[]).find(m=>m.email===fwUser?.email)) && (
                     <div onClick={()=>setMainTab("periodcal")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.6s both"}}>
                       <div style={iconWrap("rgba(236,72,153,0.10)","rgba(236,72,153,0.15)")}>
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#F472B6":"#DB2777"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M12 16a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill={isDark?"#F472B6":"#DB2777"}/></svg>
@@ -7420,7 +7517,7 @@ export default function PulseApp() {
         )}
 
         {/* ─── PERIOD CALENDAR SCREEN ────────────────────────────────────────*/}
-        {mainTab === "periodcal" && (
+        {mainTab === "periodcal" && canViewHealthLogs((fwMembers||[]).find(m=>m.email===fwUser?.email)) && (
           <div style={{flex:1,display:"flex",flexDirection:"column",padding:"0 0 100px",animation:"fadeIn 0.3s ease"}}>
             {/* Header */}
             <div style={{padding:"16px 20px 10px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
@@ -8201,6 +8298,19 @@ export default function PulseApp() {
                         </div>
                       )}
                     </div>
+                    {me && me.role !== "head" && (
+                      <div style={{marginTop:12}}>
+                        <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:600,marginBottom:6}}>Relation</div>
+                        <div style={{display:"flex",gap:6}}>
+                          {[{id:"spouse",label:"Spouse"},{id:"child",label:"Child"}].map(r=>(
+                            <div key={r.id} onClick={()=>saveProfile("relation", r.id)} style={{flex:1,padding:"10px 8px",borderRadius:12,fontSize:12,fontWeight:700,cursor:"pointer",textAlign:"center",background:inferRelation(me)===r.id?"rgba(168,85,247,0.15)":(isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.04)"),border:`1px solid ${inferRelation(me)===r.id?"#A855F7":T.border}`,color:inferRelation(me)===r.id?"#A855F7":T.textMuted}}>{r.label}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {me?.role === "head" && (
+                      <div style={{marginTop:12,fontSize:12,color:T.textFaint}}>Relation: Head of family</div>
+                    )}
                   </div>
                 )}
                 <div style={{marginBottom:16}}/>
@@ -8508,8 +8618,15 @@ export default function PulseApp() {
                     <div style={{fontSize:13,fontWeight:700,color:T.text}}>{m.name || (m.email||"?").split("@")[0]}</div>
                     <div style={{fontSize:10,color:T.textFaint}}>{m.email}</div>
                   </div>
-                  <div style={{fontSize:9,fontWeight:700,color:m.role==="head"?"#22C55E":"#A855F7",background:m.role==="head"?"rgba(34,197,94,0.12)":"rgba(168,85,247,0.12)",padding:"3px 8px",borderRadius:10}}>
-                    {m.role === "head" ? "Head" : "Member"}
+                  <div onClick={()=>{
+                    if (fwRole !== "head" || m.role === "head") return;
+                    const next = inferRelation(m) === "child" ? "spouse" : "child";
+                    const updated = fwMembers.map(row => row.email === m.email ? { ...row, relation: next } : row);
+                    setFwMembers(updated);
+                    localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
+                    if (fwWorkspace?.fileIds?.members && fwToken) fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken).catch(()=>{});
+                  }} style={{fontSize:9,fontWeight:700,color:m.role==="head"?"#22C55E":"#A855F7",background:m.role==="head"?"rgba(34,197,94,0.12)":"rgba(168,85,247,0.12)",padding:"3px 8px",borderRadius:10,cursor:fwRole==="head"&&m.role!=="head"?"pointer":"default"}}>
+                    {m.role === "head" ? "Head" : (inferRelation(m) === "child" ? "Child" : "Spouse")}
                   </div>
                   {fwRole === "head" && m.role !== "head" && (
                     <div onClick={()=>fwRemoveMember(m.email)} style={{fontSize:13,color:T.textFaint,cursor:"pointer",padding:"4px 6px"}}>❌</div>
@@ -8538,14 +8655,20 @@ export default function PulseApp() {
                       style={{width:"100%",boxSizing:"border-box",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"11px 13px",fontSize:13,color:T.text,outline:"none",marginBottom:10}}
                     />
                     <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",fontWeight:700,marginBottom:6}}>Gender</div>
-                    <div style={{display:"flex",gap:6,marginBottom:14}}>
+                    <div style={{display:"flex",gap:6,marginBottom:10}}>
                       {[{id:"male",label:"Male",emoji:"👨"},{id:"female",label:"Female",emoji:"👩"},{id:"boy",label:"Boy",emoji:"👦"},{id:"girl",label:"Girl",emoji:"👧"}].map(g=>(
                         <div key={g.id} onClick={()=>setFwInviteGender(g.id)} style={{flex:1,padding:"8px 4px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",textAlign:"center",background:fwInviteGender===g.id?"rgba(34,197,94,0.2)":isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.04)",border:`1px solid ${fwInviteGender===g.id?"#22C55E":T.border}`,color:fwInviteGender===g.id?"#22C55E":T.textMuted,transition:"all 0.15s"}}>{g.emoji} {g.label}</div>
                       ))}
                     </div>
+                    <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",fontWeight:700,marginBottom:6}}>Relation</div>
+                    <div style={{display:"flex",gap:6,marginBottom:14}}>
+                      {[{id:"spouse",label:"Spouse"},{id:"child",label:"Child"}].map(r=>(
+                        <div key={r.id} onClick={()=>setFwInviteRelation(r.id)} style={{flex:1,padding:"8px 4px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",textAlign:"center",background:fwInviteRelation===r.id?"rgba(168,85,247,0.2)":isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.04)",border:`1px solid ${fwInviteRelation===r.id?"#A855F7":T.border}`,color:fwInviteRelation===r.id?"#C4B5FD":T.textMuted}}>{r.label}</div>
+                      ))}
+                    </div>
                     {fwInviteError && <div style={{fontSize:11,color:"#FF3B5C",marginBottom:10}}>{fwInviteError}</div>}
                     <div style={{display:"flex",gap:10}}>
-                      <div onClick={()=>{setFwShowInvite(false);setFwInviteEmail("");setFwInviteName("");setFwInviteGender("");setFwInviteError("");}} style={{flex:1,background:T.bgInput,borderRadius:12,padding:"12px",textAlign:"center",cursor:"pointer",fontSize:13,fontWeight:700,color:T.textMuted}}>Cancel</div>
+                      <div onClick={()=>{setFwShowInvite(false);setFwInviteEmail("");setFwInviteName("");setFwInviteGender("");setFwInviteRelation("");setFwInviteError("");}} style={{flex:1,background:T.bgInput,borderRadius:12,padding:"12px",textAlign:"center",cursor:"pointer",fontSize:13,fontWeight:700,color:T.textMuted}}>Cancel</div>
                       <div onClick={fwInviteMember} style={{flex:1,background:fwInviteEmail.includes("@")?"linear-gradient(135deg,#22C55E,#10B981)":"rgba(34,197,94,0.3)",borderRadius:12,padding:"12px",textAlign:"center",cursor:fwInviteStatus==="sending"?"wait":"pointer",fontSize:13,fontWeight:800,color:"#fff"}}>{fwInviteStatus==="sending"?"Sending invite…":"Add & Invite"}</div>
                     </div>
                     {fwInviteStatus==="sent" && <div style={{textAlign:"center",marginTop:10,fontSize:12,fontWeight:700,color:"#22C55E"}}>✅ Member added & invite email sent!</div>}

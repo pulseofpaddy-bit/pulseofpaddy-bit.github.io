@@ -44,6 +44,11 @@ export function pingCollection(path) {
   return clean ? `${root}/${clean}` : root;
 }
 
+export function healthCollection(kind) {
+  if (!householdId) return null;
+  return `${RTDB_ROOT}/households/${householdId}/health/${kind}.json`;
+}
+
 export function legacyPingUrl() {
   return `${RTDB_ROOT}/pingme.json`;
 }
