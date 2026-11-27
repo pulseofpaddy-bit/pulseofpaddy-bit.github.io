@@ -1,4 +1,4 @@
-import { RTDB_ROOT, getHouseholdId, householdPingRoot, legacyPingUrl, withAuth } from "./rtdbPaths.js";
+import { RTDB_ROOT, withAuth } from "./rtdbPaths.js";
 
 const ID_KEY = "pulse_fb_id";
 const REFRESH_KEY = "pulse_fb_refresh";
@@ -208,63 +208,3 @@ export async function registerHouseholdMember({ householdId, email, role, gender
   return res.ok;
 }
 
-export async function claimLegacyHousehold(householdId) {
-  if (!householdId) return false;
-  const res = await fetch(`${RTDB_ROOT}/meta/legacyHouseholdId.json`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(householdId),
-  });
-  return res.ok;
-}
-
-// Copy the old /pingme tree into this household. The old tree is left in place.
-export async function migrateLegacyPingme(householdId) {
-  if (!householdId) return false;
-  const flagUrl = `${RTDB_ROOT}/households/${householdId}/pingmeMigrated.json`;
-  const flagRes = await fetch(flagUrl);
-  if (flagRes.ok) {
-    const flag = await flagRes.json();
-    if (flag === true) return true;
-  } else if (flagRes.status === 401) {
-    return false;
-  }
-  const legacyRes = await fetch(legacyPingUrl());
-  if (!legacyRes.ok) return false;
-  const legacy = await legacyRes.json();
-  if (legacy && typeof legacy === "object" && !legacy.error) {
-    const root = householdPingRoot();
-    if (!root) return false;
-    const copied = await fetch(`${root}.json`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(legacy),
-    });
-    if (!copied.ok) return false;
-  }
-  await fetch(flagUrl, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(true),
-  });
-  return true;
-}
-
-export function serviceWorkerAuthPayload() {
-  const base = getHouseholdId() ? householdPingRoot() : "";
-  return {
-    type: "SET_FIREBASE_AUTH",
-    token: localStorage.getItem(ID_KEY) || "",
-    refreshToken: localStorage.getItem(REFRESH_KEY) || "",
-    expiresAt: Number(localStorage.getItem(EXP_KEY) || 0),
-    apiKey: "",
-    pingBase: base ? base.replace(/\/$/, "") : "",
-  };
-}
-
-export async function serviceWorkerAuthPayloadWithKey() {
-  const payload = serviceWorkerAuthPayload();
-  const config = await loadFirebaseConfig();
-  payload.apiKey = config?.apiKey || "";
-  return payload;
-}
