@@ -1,8 +1,16 @@
 import { useState, useEffect, useRef } from "react";
-import { calendarDateFromText, parseDate } from "./src/dates.js";
-import { checkIsOpen } from "./src/openingHours.js";
-import { folderKey, healthCollection, setHouseholdId } from "./src/rtdbPaths.js";
-import { canViewHealthLogs, inferRelation } from "./src/healthAccess.js";
+import { calendarDateFromText, parseDate } from "../dates.js";
+import { checkIsOpen } from "../openingHours.js";
+import { folderKey, healthCollection, setHouseholdId } from "../rtdbPaths.js";
+import { canViewHealthLogs, inferRelation } from "../healthAccess.js";
+import { HomeScreen } from "../components/shell/HomeScreen.jsx";
+import { SignInScreen } from "../components/shell/SignInScreen.jsx";
+import { OnboardingFlow } from "../components/shell/OnboardingFlow.jsx";
+import { BottomNav } from "../components/shell/BottomNav.jsx";
+import { ScreenBoundary } from "../components/ScreenBoundary.jsx";
+import { ToastProvider } from "../components/ui/Toast.jsx";
+import { useVisibleInterval } from "../hooks/useVisibleInterval.js";
+import { mergeFamilyItems } from "../hooks/useFamilyList.js";
 import {
   clearFirebaseSession,
   firebaseEmail,
@@ -12,7 +20,7 @@ import {
   signInWithGoogleIdToken,
   subscribeFirebaseNotice,
   subscribeFirebaseSession,
-} from "./src/firebaseSession.js";
+} from "../firebaseSession.js";
 
 installRtdbFetch();
 
@@ -144,6 +152,11 @@ const OTT_CATEGORIES = [
 ];
 
 // No hardcoded OTT fallback — always use live TMDb data
+
+// Shared family lists live under /family/{household}. Member lookup maps an
+// email to the household key. Both stay closed to anonymous readers.
+const FAMILY_BASE = "https://pulse-family-default-rtdb.firebaseio.com/family";
+const FAMILY_MEMBER_LOOKUP = "https://pulse-family-default-rtdb.firebaseio.com/member_lookup";
 
 // ─── FAMILY WORKSPACE CONFIG ────────────────────────────────────────
 const FAMILY_CLIENT_ID   = "360320151404-1miklman0sr6gends9nuuuggecauneea.apps.googleusercontent.com";
@@ -1171,7 +1184,7 @@ export default function PulseApp() {
   }, [mainTab, movieTab, ottCategory]);
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [isOTTMovie, setIsOTTMovie] = useState(false);
-  const [time, setTime] = useState(new Date());
+  const [hour, setHour] = useState(() => new Date().getHours());
   const [themeOverride, setThemeOverride] = useState(null);
   const [homeWeather, setHomeWeather] = useState(null);
   const [hydWeather, setHydWeather]   = useState(null);
@@ -1186,7 +1199,10 @@ export default function PulseApp() {
   const [cityInput, setCityInput] = useState("");
   const [searchedCity, setSearchedCity] = useState(null);
 
-  useEffect(() => { const t = setInterval(()=>setTime(new Date()),1000); return ()=>clearInterval(t); }, []);
+  useEffect(() => {
+    const id = setInterval(() => setHour(new Date().getHours()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Fetch weather via Open-Meteo (free, no API key, CORS-friendly)
   // Canton, MI: 42.3087, -83.4827 | Second country: dynamic
@@ -1210,7 +1226,6 @@ export default function PulseApp() {
     return () => clearInterval(interval);
   }, [secondCountry]);
 
-  const hour = time.getHours();
   const autoIsDark = hour < 6 || hour >= 20;
   const isDark = themeOverride === null ? autoIsDark : themeOverride === "dark";
 
@@ -1349,10 +1364,16 @@ export default function PulseApp() {
     if (!sharedKey) return; // no workspace yet — wait
     const key = sharedKey.replace(/[.#$[\]]/g, ",");
     const fbUrl = `${FAMILY_BASE}/${key}/grocery`;
-    loadGrocery(fbUrl); // immediate load
-    const groceryPollId = setInterval(() => { loadGrocery(fbUrl); }, 10000);
-    return () => clearInterval(groceryPollId);
+    loadGrocery(fbUrl);
   }, [mainTab, fwSharedFolderKey, fwWorkspace?.folderId]);
+
+  useVisibleInterval(() => {
+    if (mainTab !== "grocery") return;
+    const sharedKey = fwSharedFolderKey || fwWorkspace?.folderId;
+    if (!sharedKey) return;
+    const key = sharedKey.replace(/[.#$[\]]/g, ",");
+    loadGrocery(`${FAMILY_BASE}/${key}/grocery`);
+  }, mainTab === "grocery" ? 10000 : null);
 
   async function loadGrocery(fbUrl) {
     setGroceryLoading(true);
@@ -1372,12 +1393,8 @@ export default function PulseApp() {
           // but skip the merge if a write is currently in-flight (to avoid race condition)
           if (!groceryWritePending.current) {
             setGroceryItems(prev => {
-              const localOnly = prev.filter(i => !i.fbId && i.text && i.text.trim()); // local items with text, not yet in Firebase
-              const merged = [...localOnly, ...fbItems];
-              // Deduplicate by id (local item wins if same id exists)
-              const seen = new Set();
-              const deduped = merged.filter(i => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
-              deduped.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+              const localOnly = prev.filter(i => !i.fbId && i.text && i.text.trim());
+              const deduped = mergeFamilyItems(localOnly, fbItems);
               localStorage.setItem("pulse_grocery_items", JSON.stringify(deduped));
               return deduped;
             });
@@ -1921,10 +1938,16 @@ export default function PulseApp() {
     if (!sharedKey) { loadTodos(); return; } // fallback to Drive if no shared key yet
     const key = sharedKey.replace(/[.#$[\]]/g, ",");
     const fbUrl = `${FAMILY_BASE}/${key}/todos`;
-    loadTodosFromFirebase(fbUrl); // immediate load
-    const todoPollId = setInterval(() => { loadTodosFromFirebase(fbUrl); }, 10000);
-    return () => clearInterval(todoPollId);
+    loadTodosFromFirebase(fbUrl);
   }, [mainTab, fwSharedFolderKey, fwWorkspace?.folderId]);
+
+  useVisibleInterval(() => {
+    if (mainTab !== "todo") return;
+    const sharedKey = fwSharedFolderKey || fwWorkspace?.folderId;
+    if (!sharedKey) return;
+    const key = sharedKey.replace(/[.#$[\]]/g, ",");
+    loadTodosFromFirebase(`${FAMILY_BASE}/${key}/todos`);
+  }, mainTab === "todo" ? 10000 : null);
 
   // Sync todo items to service worker so it can fire due-date reminders when app is closed
   useEffect(() => {
@@ -4339,11 +4362,9 @@ export default function PulseApp() {
   }
 
 
-  const timeStr = time.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
-  const dateStr = time.toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"});
-
   return (
-    <div style={{width:"100%",minHeight:"100dvh",minHeight:"-webkit-fill-available",background:T.bg,fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",paddingTop:"env(safe-area-inset-top)",paddingBottom:"env(safe-area-inset-bottom)",paddingLeft:"env(safe-area-inset-left)",paddingRight:"env(safe-area-inset-right)",WebkitTapHighlightColor:"transparent",WebkitFontSmoothing:"antialiased",MozOsxFontSmoothing:"grayscale"}}>
+    <ToastProvider isDark={isDark}>
+    <div data-theme={isDark ? "dark" : "light"} style={{width:"100%",minHeight:"100dvh",background:T.bg,fontFamily:"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",paddingTop:"env(safe-area-inset-top)",paddingBottom:"env(safe-area-inset-bottom)",paddingLeft:"env(safe-area-inset-left)",paddingRight:"env(safe-area-inset-right)"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -4381,397 +4402,62 @@ export default function PulseApp() {
 
             {/* SPLASH — Google Sign-in */}
             {onboardingStep === "splash" && (
-              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",textAlign:"center",animation:"fadeIn 0.5s ease"}}>
-                {/* App icon */}
-                <div style={{width:120,height:120,borderRadius:32,background:"linear-gradient(135deg,#C084FC,#F472B6,#FB923C)",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:8,boxShadow:"0 8px 32px rgba(192,132,252,0.4)"}}>
-                  <span style={{fontSize:52}}>❤️</span>
-                </div>
-                <div style={{width:24,height:24,borderRadius:12,background:"rgba(255,255,255,0.12)",display:"flex",alignItems:"center",justifyContent:"center",marginTop:-12,marginLeft:60,marginBottom:20}}>
-                  <span style={{fontSize:11}}>🩶</span>
-                </div>
-
-                <h1 style={{fontSize:32,fontWeight:900,color:"#fff",letterSpacing:"-0.03em",marginBottom:8,fontFamily:"Georgia,serif"}}>PULSE</h1>
-                <p style={{fontSize:14,color:"rgba(255,255,255,0.5)",marginBottom:48}}>Your family's heartbeat in one app.</p>
-
-                {fwLoading ? (
-                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 32px"}}>
-                    <div style={{width:20,height:20,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:10,animation:"pulse 0.8s linear infinite"}}/>
-                    <span style={{fontSize:14,color:"rgba(255,255,255,0.6)"}}>Signing in...</span>
-                  </div>
-                ) : (
-                  <div onClick={fwGoogleLogin} style={{background:"#fff",borderRadius:28,padding:"14px 36px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,boxShadow:"0 4px 20px rgba(0,0,0,0.3)",transition:"transform 0.15s",minWidth:260,justifyContent:"center"}}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 0 0 1 12c0 1.77.42 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-                    <span style={{fontSize:15,fontWeight:700,color:"#333"}}>Continue with Google</span>
-                  </div>
-                )}
-
-                {fwError && <p style={{fontSize:12,color:"#FF6B6B",marginTop:16}}>{fwError}</p>}
-              </div>
+              <SignInScreen loading={fwLoading} error={fwError} onGoogle={fwGoogleLogin} />
             )}
 
-            {/* ROLE SELECTION */}
-            {onboardingStep === "role" && fwUser && (
-              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",textAlign:"center",animation:"fadeIn 0.4s ease"}}>
-                {fwUser.photo ? <img src={fwUser.photo} style={{width:64,height:64,borderRadius:32,marginBottom:16,border:"3px solid rgba(255,255,255,0.1)"}} alt=""/> : <div style={{width:64,height:64,borderRadius:32,background:"linear-gradient(135deg,#22C55E,#10B981)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,color:"#fff",marginBottom:16}}>{fwUser.name?.[0]}</div>}
-                <h2 style={{fontSize:22,fontWeight:900,color:"#fff",marginBottom:4}}>Welcome, {fwUser.name?.split(" ")[0]}!</h2>
-                <p style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:20}}>How would you like to use Pulse?</p>
-
-                {/* Gender Selection */}
-                <div style={{display:"flex",gap:8,marginBottom:28,width:"100%",maxWidth:320}}>
-                  {[{id:"male",label:"Male",emoji:"👨"},{id:"female",label:"Female",emoji:"👩"}].map(g=>(
-                    <div key={g.id} onClick={()=>setOnboardingGender(g.id)} style={{flex:1,padding:"12px 8px",borderRadius:14,fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"center",background:onboardingGender===g.id?"rgba(34,197,94,0.25)":"rgba(255,255,255,0.06)",border:`1px solid ${onboardingGender===g.id?"#22C55E":"rgba(255,255,255,0.1)"}`,color:onboardingGender===g.id?"#22C55E":"rgba(255,255,255,0.5)",transition:"all 0.15s"}}>{g.emoji} {g.label}</div>
-                  ))}
-                </div>
-
-                {fwLoading ? (
-                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 32px"}}>
-                    <div style={{width:20,height:20,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:10,animation:"pulse 0.8s linear infinite"}}/>
-                    <span style={{fontSize:14,color:"rgba(255,255,255,0.6)"}}>Setting up...</span>
-                  </div>
-                ) : (
-                  <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",maxWidth:320,opacity:onboardingGender?1:0.4,pointerEvents:onboardingGender?"auto":"none",transition:"opacity 0.2s"}}>
-                    <div onClick={()=>onboardingSelectRole("head")} style={{background:"linear-gradient(135deg,#22C55E,#10B981)",borderRadius:18,padding:"20px",cursor:"pointer",textAlign:"left",boxShadow:"0 4px 16px rgba(34,197,94,0.3)"}}>
-                      <div style={{fontSize:28,marginBottom:8}}>👑</div>
-                      <div style={{fontSize:16,fontWeight:800,color:"#fff",marginBottom:4}}>I'm the Family Head</div>
-                      <div style={{fontSize:12,color:"rgba(255,255,255,0.75)",lineHeight:1.5}}>Create a family workspace and invite your family members to join</div>
-                    </div>
-                    <div onClick={()=>onboardingSelectRole("member")} style={{background:"rgba(168,85,247,0.12)",border:"1px solid rgba(168,85,247,0.3)",borderRadius:18,padding:"20px",cursor:"pointer",textAlign:"left"}}>
-                      <div style={{fontSize:28,marginBottom:8}}>👤</div>
-                      <div style={{fontSize:16,fontWeight:800,color:"#fff",marginBottom:4}}>I'm a Family Member</div>
-                      <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",lineHeight:1.5}}>Join your family head's workspace automatically</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* FAMILY HEAD — Add members now or later */}
-            {onboardingStep === "add_members" && fwUser && (
-              <div style={{flex:1,display:"flex",flexDirection:"column",padding:"40px 24px",animation:"fadeIn 0.4s ease"}}>
-                <div style={{textAlign:"center",marginBottom:32}}>
-                  <div style={{fontSize:36,marginBottom:12}}>👨‍👩‍👧‍👦</div>
-                  <h2 style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:6}}>Add Family Members</h2>
-                  <p style={{fontSize:12,color:"rgba(255,255,255,0.45)"}}>Invite them by email so they can join your workspace</p>
-                </div>
-
-                <div style={{flex:1,overflowY:"auto"}}>
-                  {onboardingAddEmails.map((email, i) => (
-                    <div key={i} style={{marginBottom:14,animation:`slideUp 0.3s ease ${i*0.05}s both`}}>
-                      <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginBottom:5}}>Member {i+1}</div>
-                      <div style={{display:"flex",gap:8,marginBottom:6}}>
-                        <input
-                          value={onboardingAddNames[i]||""}
-                          onChange={e=>{const n=[...onboardingAddNames];n[i]=e.target.value;setOnboardingAddNames(n);}}
-                          placeholder="Name"
-                          style={{flex:1,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"12px 14px",fontSize:14,color:"#fff",outline:"none",fontFamily:"inherit"}}
-                        />
-                        <input
-                          value={email}
-                          onChange={e=>{const n=[...onboardingAddEmails];n[i]=e.target.value;setOnboardingAddEmails(n);}}
-                          placeholder="email@example.com"
-                          type="email"
-                          style={{flex:1.5,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"12px 14px",fontSize:14,color:"#fff",outline:"none",fontFamily:"inherit"}}
-                        />
-                      </div>
-                      <div style={{display:"flex",gap:6,marginBottom:6}}>
-                        {[{id:"male",label:"Male",emoji:"👨"},{id:"female",label:"Female",emoji:"👩"},{id:"boy",label:"Boy",emoji:"👦"},{id:"girl",label:"Girl",emoji:"👧"}].map(g=>(
-                          <div key={g.id} onClick={()=>{const n=[...onboardingAddGenders];n[i]=g.id;setOnboardingAddGenders(n);}} style={{flex:1,padding:"8px 6px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",textAlign:"center",background:onboardingAddGenders[i]===g.id?"rgba(34,197,94,0.25)":"rgba(255,255,255,0.06)",border:`1px solid ${onboardingAddGenders[i]===g.id?"#22C55E":"rgba(255,255,255,0.1)"}`,color:onboardingAddGenders[i]===g.id?"#22C55E":"rgba(255,255,255,0.5)",transition:"all 0.15s"}}>{g.emoji} {g.label}</div>
-                        ))}
-                      </div>
-                      <div style={{display:"flex",gap:6,marginBottom:2}}>
-                        {[{id:"spouse",label:"Spouse"},{id:"child",label:"Child"}].map(r=>(
-                          <div key={r.id} onClick={()=>{const n=[...onboardingAddRelations];n[i]=r.id;setOnboardingAddRelations(n);}} style={{flex:1,padding:"8px 6px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",textAlign:"center",background:onboardingAddRelations[i]===r.id?"rgba(168,85,247,0.25)":"rgba(255,255,255,0.06)",border:`1px solid ${onboardingAddRelations[i]===r.id?"#A855F7":"rgba(255,255,255,0.1)"}`,color:onboardingAddRelations[i]===r.id?"#C4B5FD":"rgba(255,255,255,0.5)"}}>{r.label}</div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <div onClick={()=>{setOnboardingAddEmails(p=>[...p,""]);setOnboardingAddNames(p=>[...p,""]);setOnboardingAddGenders(p=>[...p,""]);setOnboardingAddRelations(p=>[...p,""]);}} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"10px 0",marginBottom:12}}>
-                    <div style={{width:28,height:28,borderRadius:14,background:"rgba(34,197,94,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#22C55E"}}>+</div>
-                    <span style={{fontSize:13,color:"#22C55E",fontWeight:600}}>Add another member</span>
-                  </div>
-                </div>
-
-                <div style={{display:"flex",flexDirection:"column",gap:10,paddingTop:16}}>
-                  {onboardingAddEmails.some(e => e.includes("@")) && (
-                    <div onClick={onboardingInviting?null:onboardingInviteMembers} style={{background:"linear-gradient(135deg,#22C55E,#10B981)",borderRadius:16,padding:"16px",textAlign:"center",cursor:onboardingInviting?"default":"pointer",fontSize:15,fontWeight:800,color:"#fff",opacity:onboardingInviting?0.7:1}}>
-                      {onboardingInviting ? "⏳ Inviting..." : "✅ Add Members & Continue"}
-                    </div>
-                  )}
-                  <div onClick={()=>setOnboardingStep(null)} style={{background:"rgba(255,255,255,0.06)",borderRadius:16,padding:"16px",textAlign:"center",cursor:"pointer",fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.6)"}}>
-                    Skip — I'll add later in Settings
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* GENDER SELECTION (for returning users without gender) */}
-            {onboardingStep === "gender" && fwUser && (
-              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",textAlign:"center",animation:"fadeIn 0.4s ease"}}>
-                {fwUser.photo ? <img src={fwUser.photo} style={{width:64,height:64,borderRadius:32,marginBottom:16,border:"3px solid rgba(255,255,255,0.1)"}} alt=""/> : <div style={{width:64,height:64,borderRadius:32,background:"linear-gradient(135deg,#22C55E,#10B981)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,color:"#fff",marginBottom:16}}>{fwUser.name?.[0]}</div>}
-                <h2 style={{fontSize:22,fontWeight:900,color:"#fff",marginBottom:4}}>Welcome back, {fwUser.name?.split(" ")[0]}!</h2>
-                <p style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:28}}>Please select your gender to continue</p>
-                <div style={{display:"flex",gap:12,width:"100%",maxWidth:300,marginBottom:20}}>
-                  {[{id:"male",label:"Male",emoji:"👨"},{id:"female",label:"Female",emoji:"👩"}].map(g=>(
-                    <div key={g.id} onClick={()=>setOnboardingGender(g.id)} style={{flex:1,padding:"20px 12px",borderRadius:18,fontSize:15,fontWeight:800,cursor:"pointer",textAlign:"center",background:onboardingGender===g.id?"rgba(34,197,94,0.25)":"rgba(255,255,255,0.06)",border:`2px solid ${onboardingGender===g.id?"#22C55E":"rgba(255,255,255,0.1)"}`,color:onboardingGender===g.id?"#22C55E":"rgba(255,255,255,0.5)",transition:"all 0.15s"}}>
-                      <div style={{fontSize:36,marginBottom:8}}>{g.emoji}</div>
-                      {g.label}
-                    </div>
-                  ))}
-                </div>
-                <div onClick={()=>{
-                  if (!onboardingGender) return;
-                  const updated = (fwMembers||[]).map(m => m.email === fwUser.email ? {...m, gender: onboardingGender} : m);
-                  setFwMembers(updated);
-                  // Persist to localStorage cache immediately so gender survives app restart
-                  localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
-                  if (fwWorkspace?.fileIds?.members && fwToken) {
-                    fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken).catch(()=>{});
-                  }
-                  setOnboardingStep(null);
-                }} style={{background:onboardingGender?"linear-gradient(135deg,#22C55E,#10B981)":"rgba(255,255,255,0.1)",borderRadius:16,padding:"16px 48px",cursor:onboardingGender?"pointer":"default",fontSize:15,fontWeight:800,color:onboardingGender?"#fff":"rgba(255,255,255,0.3)",transition:"all 0.2s",boxShadow:onboardingGender?"0 4px 16px rgba(34,197,94,0.3)":"none"}}>Continue</div>
-              </div>
-            )}
-
-            {/* FAMILY MEMBER — Waiting / Error */}
-            {onboardingStep === "member_wait" && fwUser && (
-              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",textAlign:"center",animation:"fadeIn 0.4s ease"}}>
-                <div style={{fontSize:48,marginBottom:16}}>📨</div>
-                <h2 style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:8}}>Not Registered Yet</h2>
-                <p style={{fontSize:13,color:"rgba(255,255,255,0.5)",lineHeight:1.6,marginBottom:6,maxWidth:300}}>{onboardingMemberError}</p>
-                <p style={{fontSize:12,color:"rgba(255,255,255,0.3)",marginBottom:32}}>Signed in as: {fwUser.email}</p>
-                <div style={{display:"flex",flexDirection:"column",gap:10,width:"100%",maxWidth:280}}>
-                  <div onClick={()=>{setOnboardingStep("role");}} style={{background:"rgba(255,255,255,0.08)",borderRadius:14,padding:"14px",textAlign:"center",cursor:"pointer",fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.7)"}}>← Go Back</div>
-                  <div onClick={fwSignOut} style={{borderRadius:14,padding:"14px",textAlign:"center",cursor:"pointer",fontSize:13,fontWeight:700,color:"#FF6B6B"}}>Sign Out</div>
-                </div>
-              </div>
-            )}
+            <OnboardingFlow
+              step={onboardingStep}
+              user={fwUser}
+              loading={fwLoading}
+              gender={onboardingGender}
+              setGender={setOnboardingGender}
+              onSelectRole={onboardingSelectRole}
+              emails={onboardingAddEmails}
+              names={onboardingAddNames}
+              genders={onboardingAddGenders}
+              relations={onboardingAddRelations}
+              setEmails={setOnboardingAddEmails}
+              setNames={setOnboardingAddNames}
+              setGenders={setOnboardingAddGenders}
+              setRelations={setOnboardingAddRelations}
+              inviting={onboardingInviting}
+              onInvite={onboardingInviteMembers}
+              onSkip={() => setOnboardingStep(null)}
+              memberError={onboardingMemberError}
+              onBack={() => setOnboardingStep("role")}
+              onSignOut={fwSignOut}
+              onSaveGender={() => {
+                if (!onboardingGender) return;
+                const updated = (fwMembers || []).map(m => m.email === fwUser.email ? { ...m, gender: onboardingGender } : m);
+                setFwMembers(updated);
+                localStorage.setItem("pulse_fw_members_cache", JSON.stringify(updated));
+                if (fwWorkspace?.fileIds?.members && fwToken) {
+                  fwWriteFile(fwWorkspace.fileIds.members, updated, fwToken).catch(() => {});
+                }
+                setOnboardingStep(null);
+              }}
+            />
           </div>
         )}
 
         {/* ─── MAIN APP (only when onboarding complete) ─── */}
         {onboardingStep === null && (<>
+        <ScreenBoundary title={mainTab || "Home"} key={mainTab || "home"}>
 
-        {/* ─── HOME SCREEN ────────────────────────────────────────*/}
         {mainTab === null && (
-          <div style={{flex:1,display:"flex",flexDirection:"column",animation:"fadeIn 0.4s ease",background:isDark?T.bg:"#F2F2F7"}}>
-            {/* Top Status Bar */}
-            <div style={{padding:"12px 20px 0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              {(() => {
-                const estTime = time.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
-                const secTime = time.toLocaleTimeString(secondCountry.locale,{hour:"2-digit",minute:"2-digit",hour12:true,timeZone:secondCountry.tz});
-                const wEmoji = (w) => {
-                  const c = w?.weathercode;
-                  if (c == null) return "";
-                  if (c === 0) return "☀️";
-                  if (c === 1) return "🌤️";
-                  if (c === 2) return "⛅";
-                  if (c === 3) return "☁️";
-                  if (c >= 51 && c <= 67) return "🌧️";
-                  if (c >= 71 && c <= 77) return "❄️";
-                  if (c >= 80 && c <= 82) return "🌦️";
-                  if (c >= 95) return "⚡️";
-                  return "⛅";
-                };
-                const cantonC = homeWeather?.temperature != null ? homeWeather.temperature : null;
-                const secC    = hydWeather?.temperature  != null ? hydWeather.temperature  : null;
-                return (
-                  <div style={{display:"flex",alignItems:"center",gap:10,fontSize:10,marginLeft:"auto"}}>
-                    <span style={{color:T.text,fontWeight:600}}>🇺🇸 {estTime} {cantonC!==null?`${wEmoji(homeWeather)} ${cantonC}°C`:""}</span>
-                    <span style={{color:T.text,fontWeight:600}}>{secondCountry.flag} {secTime} {secC!==null?`${wEmoji(hydWeather)} ${secC}°C`:""}</span>
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Brand Header */}
-            <div style={{padding:"16px 20px 12px",display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
-              <div>
-                <h1 style={{fontSize:36,fontWeight:900,color:T.text,letterSpacing:"-0.01em",fontFamily:"Baskerville,'Baskerville Old Face','Hoefler Text','Times New Roman',serif",lineHeight:1,margin:0,display:"flex",alignItems:"center"}}>
-                  PULSE
-                  <svg width="28" height="28" viewBox="0 0 100 100" style={{marginLeft:8}}>
-                    {/* Blue left half of heart */}
-                    <path d="M50,88 C20,68 4,50 4,32 C4,16 16,4 32,4 C40,4 46,8 50,14" fill="none" stroke="#3B82F6" strokeWidth="10" strokeLinecap="round"/>
-                    {/* Red right half of heart */}
-                    <path d="M50,14 C54,8 60,4 68,4 C84,4 96,16 96,32 C96,50 80,68 50,88" fill="none" stroke="#FF3B5C" strokeWidth="10" strokeLinecap="round"/>
-                    {/* ECG heartbeat line through the middle */}
-                    <path d="M22,48 L36,48 L40,36 L46,60 L50,30 L54,56 L58,42 L62,48 L78,48" fill="none" stroke="#FF3B5C" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="120" strokeDashoffset="0" style={{animation:"ecgSweep 8s linear infinite"}}/>
-                  </svg>
-                </h1>
-                <p style={{fontSize:11,fontWeight:600,color:T.textMuted,letterSpacing:"0.12em",fontFamily:"'SF Pro Display',system-ui,-apple-system,sans-serif",textTransform:"uppercase",marginTop:4}}>Your World, at a Glance</p>
-              </div>
-              <div style={{display:"flex",background:isDark?"rgba(255,255,255,0.1)":"rgba(0,0,0,0.06)",borderRadius:20,padding:3,gap:2}}>
-                {[{key:"light",icon:(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={!isDark?T.text:T.textMuted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>)},{key:"dark",icon:(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={isDark?T.text:T.textMuted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>)}].map(opt=>{
-                  const active = isDark ? opt.key==="dark" : opt.key==="light";
-                  return (
-                    <div key={opt.key} onClick={()=>setThemeOverride(opt.key)}
-                      style={{padding:"6px 10px",borderRadius:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
-                        background:active?(isDark?"rgba(255,255,255,0.15)":"#fff"):"transparent",
-                        boxShadow:active&&!isDark?"0 1px 3px rgba(0,0,0,0.1)":"none",
-                        transition:"all 0.2s"}}>
-                      {opt.icon}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Scrollable content */}
-            <div style={{flex:1,overflowY:"auto",padding:"0 16px 100px",WebkitOverflowScrolling:"touch"}}>
-
-              {/* 3-Column Tile Grid */}
-              {(() => {
-                const tileCardStyle = {
-                  borderRadius:20,padding:"18px 10px 14px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-                  background:isDark?"rgba(255,255,255,0.06)":"#fff",
-                  boxShadow:isDark?"none":"0 1px 4px rgba(0,0,0,0.06)",
-                  border:isDark?"1px solid rgba(255,255,255,0.08)":"1px solid rgba(0,0,0,0.04)",
-                  transition:"transform 0.15s ease, box-shadow 0.15s ease",WebkitTapHighlightColor:"transparent",position:"relative",minHeight:110
-                };
-                const iconWrap = (color, darkColor) => ({
-                  width:44,height:44,borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:8,
-                  background:isDark?darkColor:color
-                });
-                const titleStyle = {fontSize:13,fontWeight:800,color:T.text,textAlign:"center",marginBottom:2,letterSpacing:"-0.01em"};
-                const subStyle = {fontSize:9,fontWeight:600,color:T.textMuted,textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center"};
-                const badge = (bg, color, count) => count > 0 ? (
-                  <div style={{position:"absolute",top:8,right:8,background:bg,borderRadius:10,padding:"1px 6px",fontSize:9,fontWeight:800,color:color,minWidth:18,textAlign:"center"}}>{count}</div>
-                ) : null;
-
-                return (
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:4}}>
-
-                    {/* Movies */}
-                    <div onClick={()=>setMainTab("movies")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.1s both"}}>
-                      <div style={iconWrap("rgba(107,114,128,0.08)","rgba(255,255,255,0.08)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#A0A0A0":"#6B7280"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>
-                      </div>
-                      <div style={titleStyle}>Movies</div>
-                      <div style={subStyle}>THEATER · OTT</div>
-                    </div>
-
-                    {/* Eats */}
-                    <div onClick={()=>setMainTab("restaurants")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.15s both"}}>
-                      <div style={iconWrap("rgba(234,179,8,0.10)","rgba(234,179,8,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#FACC15":"#D97706"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>
-                      </div>
-                      <div style={titleStyle}>Eats</div>
-                      <div style={subStyle}>NEARBY</div>
-                    </div>
-
-                    {/* Grocery */}
-                    <div onClick={()=>setMainTab("grocery")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.2s both"}}>
-                      <div style={iconWrap("rgba(234,179,8,0.10)","rgba(234,179,8,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#FACC15":"#D97706"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
-                      </div>
-                      <div style={titleStyle}>Grocery</div>
-                      <div style={subStyle}>SHARED</div>
-                    </div>
-
-                    {/* Doctors */}
-                    <div onClick={()=>setMainTab("doctor")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.25s both"}}>
-                      <div style={iconWrap("rgba(107,114,128,0.08)","rgba(255,255,255,0.08)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#A0A0A0":"#6B7280"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/><path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/></svg>
-                      </div>
-                      <div style={titleStyle}>Doctors</div>
-                      <div style={subStyle}>VISITS</div>
-                    </div>
-
-                    {/* To-Do */}
-                    <div onClick={()=>setMainTab("todo")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.3s both"}}>
-                      <div style={iconWrap("rgba(34,197,94,0.10)","rgba(34,197,94,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#4ADE80":"#16A34A"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                      </div>
-                      <div style={titleStyle}>To-Do</div>
-                      <div style={subStyle}>TASKS</div>
-                    </div>
-
-                    {/* Travel (Reservations) */}
-                    <div onClick={()=>setMainTab("reservations")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.35s both"}}>
-                      <div style={iconWrap("rgba(251,146,60,0.10)","rgba(251,146,60,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#FB923C":"#EA580C"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
-                      </div>
-                      <div style={titleStyle}>Travel</div>
-                      <div style={subStyle}>BOOKINGS</div>
-                    </div>
-
-                    {/* Clothing */}
-                    <div onClick={()=>setMainTab("clothing")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.4s both"}}>
-                      <div style={iconWrap("rgba(244,63,94,0.10)","rgba(244,63,94,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#FB7185":"#E11D48"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20.38 3.46L16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/></svg>
-                      </div>
-                      <div style={titleStyle}>Clothing</div>
-                      <div style={subStyle}>WISHLIST</div>
-                    </div>
-
-                    {/* Calc */}
-                    <div onClick={()=>setMainTab("calc")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.45s both"}}>
-                      <div style={iconWrap("rgba(107,114,128,0.08)","rgba(255,255,255,0.08)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#A0A0A0":"#6B7280"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="8" y2="10.01"/><line x1="12" y1="10" x2="12" y2="10.01"/><line x1="16" y1="10" x2="16" y2="10.01"/><line x1="8" y1="14" x2="8" y2="14.01"/><line x1="12" y1="14" x2="12" y2="14.01"/><line x1="16" y1="14" x2="16" y2="14.01"/><line x1="8" y1="18" x2="8" y2="18.01"/><line x1="12" y1="18" x2="12" y2="18.01"/><line x1="16" y1="18" x2="16" y2="18.01"/></svg>
-                      </div>
-                      <div style={titleStyle}>Calc</div>
-                      <div style={subStyle}>TOOLS</div>
-                    </div>
-
-                    {/* Period Calendar — only for female members */}
-                    {canViewHealthLogs((fwMembers||[]).find(m=>m.email===fwUser?.email)) && (
-                    <div onClick={()=>setMainTab("periodcal")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.6s both"}}>
-                      <div style={iconWrap("rgba(236,72,153,0.10)","rgba(236,72,153,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#F472B6":"#DB2777"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M12 16a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill={isDark?"#F472B6":"#DB2777"}/></svg>
-                      </div>
-                      <div style={titleStyle}>PC</div>
-                      <div style={subStyle}>TRACKER</div>
-                    </div>
-                    )}
-
-                    {/* Contacts */}
-                    <div onClick={()=>setMainTab("contacts")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.65s both"}}>
-                      <div style={iconWrap("rgba(99,102,241,0.10)","rgba(99,102,241,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#A5B4FC":"#6366F1"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                      </div>
-                      <div style={titleStyle}>Contacts</div>
-                      <div style={subStyle}>DIRECTORY</div>
-                    </div>
-
-                    {/* Secure Folder */}
-                    <div onClick={()=>setMainTab("securefolder")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.7s both"}}>
-                      <div style={iconWrap("rgba(239,68,68,0.10)","rgba(239,68,68,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#FCA5A5":"#EF4444"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg>
-                      </div>
-                      <div style={titleStyle}>Secure</div>
-                      <div style={subStyle}>VAULT</div>
-                    </div>
-
-                    {/* Finance */}
-                    <div onClick={()=>setMainTab("finance")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.75s both"}}>
-                      <div style={iconWrap("rgba(34,197,94,0.10)","rgba(34,197,94,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#86EFAC":"#16A34A"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                      </div>
-                      <div style={titleStyle}>Finance</div>
-                      <div style={subStyle}>TRACKER</div>
-                    </div>
-
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Bottom Navigation Bar */}
-            <div style={{position:"fixed",bottom:0,left:0,right:0,background:isDark?"rgba(8,10,14,0.95)":"rgba(255,255,255,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:`1px solid ${isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.08)"}`,display:"flex",alignItems:"center",justifyContent:"space-around",padding:"8px 0 max(env(safe-area-inset-bottom,8px),8px)",zIndex:100}}>
-              {[
-                {key:null,label:"Home",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill={mainTab===null?(isDark?"#fff":"#000"):"none"} stroke={mainTab===null?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},
-                {key:"movies",label:"Movies",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={mainTab==="movies"?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>},
-                {key:"grocery",label:"Shop",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={mainTab==="grocery"?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>},
-                {key:"settings",label:"Settings",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={mainTab==="settings"?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>}
-              ].map(nav=>(
-                <div key={nav.key||"home"} onClick={()=>setMainTab(nav.key)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 12px",WebkitTapHighlightColor:"transparent"}}>
-                  {nav.icon}
-                  <span style={{fontSize:9,fontWeight:mainTab===nav.key||(!mainTab&&!nav.key)?700:500,color:mainTab===nav.key||(!mainTab&&!nav.key)?T.text:T.textMuted}}>{nav.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <>
+            <HomeScreen
+              isDark={isDark}
+              onOpen={setMainTab}
+              onTheme={setThemeOverride}
+              secondCountry={secondCountry}
+              homeWeather={homeWeather}
+              awayWeather={hydWeather}
+              me={(fwMembers||[]).find(m=>m.email===fwUser?.email)}
+            />
+            <BottomNav active={mainTab} onChange={setMainTab} isDark={isDark} />
+          </>
         )}
-
 
         {/* ─── MOVIES SECTION ────────────────────────────────────────*/}
         {mainTab === "movies" && (
@@ -7417,10 +7103,10 @@ export default function PulseApp() {
         {mainTab === "settings" && (
           <div style={{flex:1,display:"flex",flexDirection:"column",padding:"0 0 100px",animation:"fadeIn 0.3s ease"}}>
             {/* Header */}
-            <div style={{padding:"20px 20px 14px",flexShrink:0}}>
-              <h1 style={{fontSize:28,fontWeight:900,color:T.text,fontFamily:"Georgia,serif",letterSpacing:"-0.03em",margin:0}}>Settings</h1>
-              <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginTop:4}}>Personal Preferences</div>
-            </div>
+            <header style={{padding:"calc(16px + env(safe-area-inset-top)) 20px 12px",flexShrink:0}}>
+              <h1 style={{fontSize:28,fontWeight:700,color:T.text,letterSpacing:"-0.03em",margin:0}}>Settings</h1>
+              <p style={{fontSize:13,color:T.textMuted,margin:"6px 0 0"}}>Personal preferences</p>
+            </header>
 
             <div style={{flex:1,overflowY:"auto",padding:"0 16px 20px",WebkitOverflowScrolling:"touch"}}>
               {/* Profile Card */}
@@ -7651,34 +7337,13 @@ export default function PulseApp() {
               </div>
 
               {/* Sign Out */}
-              <div style={{background:T.bgCard,borderRadius:16,border:`1px solid ${T.border}`,overflow:"hidden",marginBottom:20}}>
-                <div onClick={fwSignOut} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",cursor:"pointer"}}>
-                  <div style={{width:34,height:34,borderRadius:10,background:"rgba(255,59,92,0.12)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF3B5C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                  </div>
-                  <div style={{fontSize:14,fontWeight:700,color:"#FF3B5C"}}>Sign Out</div>
-                  <span style={{fontSize:14,color:T.textFaint,marginLeft:"auto"}}>›</span>
-                </div>
-              </div>
+              <button type="button" onClick={fwSignOut} style={{width:"100%",minHeight:44,borderRadius:16,border:`1px solid ${T.border}`,background:"transparent",color:"#FF3B5C",fontWeight:700,cursor:"pointer",marginBottom:20}}>Sign out</button>
 
               {/* Version */}
               <div style={{textAlign:"center",padding:"20px 0",fontSize:11,color:T.textFaint,letterSpacing:"0.06em"}}>PULSE FAMILY HUB V1.2.0</div>
             </div>
 
-            {/* Bottom Nav */}
-            <div style={{position:"fixed",bottom:0,left:0,right:0,background:isDark?"rgba(8,10,14,0.95)":"rgba(255,255,255,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:`1px solid ${isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.08)"}`,display:"flex",alignItems:"center",justifyContent:"space-around",padding:"8px 0 max(env(safe-area-inset-bottom,8px),8px)",zIndex:100}}>
-              {[
-                {key:null,label:"Home",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},
-                {key:"movies",label:"Movies",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>},
-                {key:"grocery",label:"Shop",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>},
-                {key:"settings",label:"Settings",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"#fff":"#000"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>}
-              ].map(nav=>(
-                <div key={nav.key||"home"} onClick={()=>setMainTab(nav.key)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 12px",WebkitTapHighlightColor:"transparent"}}>
-                  {nav.icon}
-                  <span style={{fontSize:9,fontWeight:nav.key==="settings"?700:500,color:T.text}}>{nav.label}</span>
-                </div>
-              ))}
-            </div>
+            <BottomNav active={mainTab} onChange={setMainTab} isDark={isDark} />
           </div>
         )}
 
@@ -7811,6 +7476,7 @@ export default function PulseApp() {
           </div>
         )}
 
+        </ScreenBoundary>
         </>)}
         {/* ─── END MAIN APP ─── */}
 
@@ -7818,6 +7484,7 @@ export default function PulseApp() {
         {selectedMovie && <MovieDetailModal movie={selectedMovie} isOTT={isOTTMovie} T={T} isDark={isDark} onClose={()=>setSelectedMovie(null)}/>}
       </div>
     </div>
+    </ToastProvider>
   );
 }
 
