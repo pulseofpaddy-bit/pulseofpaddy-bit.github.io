@@ -1,6 +1,33 @@
 import { useState, useEffect, useRef } from "react";
 import { calendarDateFromText, parseDate } from "./src/dates.js";
 import { checkIsOpen } from "./src/openingHours.js";
+import { folderKey, pingCollection, setHouseholdId } from "./src/rtdbPaths.js";
+import {
+  claimLegacyHousehold,
+  clearFirebaseSession,
+  firebaseEmail,
+  getFirebaseIdToken,
+  installRtdbFetch,
+  migrateLegacyPingme,
+  registerHouseholdMember,
+  serviceWorkerAuthPayloadWithKey,
+  signInWithGoogleIdToken,
+  subscribeFirebaseNotice,
+  subscribeFirebaseSession,
+} from "./src/firebaseSession.js";
+
+installRtdbFetch();
+
+function pingFetch(path, init) {
+  const url = pingCollection(path);
+  if (!url) {
+    return Promise.resolve(new Response(JSON.stringify({ error: "No household yet" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    }));
+  }
+  return fetch(url, init);
+}
 
 // Firebase REST replies with HTTP 401 and `{error:"Permission denied"}` when
 // rules reject the caller. That object must not be stored as list data.
@@ -118,16 +145,12 @@ const OTT_CATEGORIES = [
 
 // ─── FAMILY WORKSPACE CONFIG ────────────────────────────────────────
 const FAMILY_CLIENT_ID   = "360320151404-1miklman0sr6gends9nuuuggecauneea.apps.googleusercontent.com";
-const FAMILY_SCOPES      = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.readonly";
+const FAMILY_SCOPES      = "openid https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.readonly";
 const WORKSPACE_FOLDER   = "PulseApp_Workspace";
 const WORKSPACE_FILES    = { grocery:"Grocery.json", todos:"Todo.json", appointments:"Appointments.json", members:"Members.json", periods:"Periods.json", pregnancy:"Pregnancy.json", contacts:"Contacts.json", payReminders:"PayReminders.json", moneyLent:"MoneyLent.json" };
 
 // ─── PINGME CONFIG ────────────────────────────────────────
-const PING_BASE     = "https://pulse-family-default-rtdb.firebaseio.com/pingme";
-const PING_USERS    = `${PING_BASE}/users`;
-const PING_CHATS    = `${PING_BASE}/chats`;
-const PING_GROUPS   = `${PING_BASE}/groups`;
-const PING_PRESENCE = `${PING_BASE}/presence`;
+// Chat URLs are built per household in pingFetch (src/rtdbPaths.js).
 const FAMILY_BASE          = "https://pulse-family-default-rtdb.firebaseio.com/family";
 const FAMILY_MEMBER_LOOKUP = "https://pulse-family-default-rtdb.firebaseio.com/member_lookup"; // maps member email -> head email for shared key lookup
 
@@ -611,6 +634,10 @@ export default function PulseApp() {
   const [fwInviteName, setFwInviteName] = useState("");
   const [fwInviteError, setFwInviteError] = useState("");
   const [fwInviteGender, setFwInviteGender] = useState("");
+  const [firebaseNotice, setFirebaseNotice] = useState("");
+  const [fbSession, setFbSession] = useState(0);
+  const activeHouseholdId = fwSharedFolderKey || (fwWorkspace?.folderId ? folderKey(fwWorkspace.folderId) : "");
+  setHouseholdId(activeHouseholdId);
 
   // ─── SILENT TOKEN REFRESH ────────────────────────────────────────
   // Uses a hidden iframe with prompt=none to silently refresh the OAuth token
@@ -618,11 +645,14 @@ export default function PulseApp() {
   const silentRefreshRef = useRef(null);
   function doSilentTokenRefresh() {
     if (!fwUser?.email) return;
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    sessionStorage.setItem("pulse_fw_nonce", nonce);
     const params = new URLSearchParams({
       client_id: FAMILY_CLIENT_ID,
       redirect_uri: window.location.origin + window.location.pathname,
-      response_type: "token",
+      response_type: "token id_token",
       scope: FAMILY_SCOPES,
+      nonce,
       prompt: "none",
       login_hint: fwUser.email,
       include_granted_scopes: "true",
@@ -646,6 +676,8 @@ export default function PulseApp() {
             localStorage.setItem("pulse_fw_token_exp", String(Date.now() + expiresIn * 1000));
             // Also update gAccounts so reservation sync uses fresh token
             saveGAccounts(prev => prev.map(a => a.email === fwUser.email ? { ...a, token: newToken, expired: false } : a));
+            const idToken = p.get("id_token");
+            if (idToken) signInWithGoogleIdToken(idToken, nonce);
             console.log("[AUTH] Silent token refresh succeeded");
           }
         }
@@ -670,6 +702,30 @@ export default function PulseApp() {
     }, 50 * 60 * 1000);
     return () => { clearTimeout(timer); clearInterval(interval); };
   }, [fwUser?.email, fwToken]);
+
+  useEffect(() => subscribeFirebaseNotice(setFirebaseNotice), []);
+  useEffect(() => subscribeFirebaseSession(() => setFbSession((n) => n + 1)), []);
+
+  // Join this household in Firebase, then copy old chat data once. Old /pingme is not deleted.
+  useEffect(() => {
+    if (!fwUser?.email || !activeHouseholdId) return;
+    let cancel = false;
+    (async () => {
+      const token = await getFirebaseIdToken();
+      if (!token || cancel) return;
+      await registerHouseholdMember({
+        householdId: activeHouseholdId,
+        email: firebaseEmail() || fwUser.email,
+        role: fwRole || "member",
+      });
+      if ((fwRole || "") === "head") await claimLegacyHousehold(activeHouseholdId);
+      await migrateLegacyPingme(activeHouseholdId);
+      if (navigator.serviceWorker?.controller) {
+        navigator.serviceWorker.controller.postMessage(await serviceWorkerAuthPayloadWithKey());
+      }
+    })();
+    return () => { cancel = true; };
+  }, [fwUser?.email, activeHouseholdId, fwRole, fbSession]);
 
   // ─── ONBOARDING STATE ────────────────────────────────────────
   // Steps: "splash" → "role" → "add_members" → done (null)
@@ -3444,7 +3500,7 @@ export default function PulseApp() {
           setPingMe(user);
           localStorage.setItem("pulse_ping_user", JSON.stringify(user));
           // Register in Firebase
-          fetch(`${PING_USERS}/${profile.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
+          pingFetch(`users/${profile.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
           // Only prompt for password if encryption is enabled
           if (localStorage.getItem("pulse_ping_encrypt") === "true" && !sessionStorage.getItem("pulse_ping_pass")) {
             setMainTab("ping");
@@ -3462,7 +3518,7 @@ export default function PulseApp() {
     const user = { email: fwUser.email, name: fwUser.name, photo: fwUser.photo, id: fwUser.id || fwUser.email.replace(/[^a-zA-Z0-9]/g,"") };
     // Always register/refresh in Firebase whenever fwUser is available (on every app load)
     // This ensures the user appears in other family members' contact lists
-    fetch(`${PING_BASE}/users/${user.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
+    pingFetch(`users/${user.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
     if (!pingMe) {
       setPingMe(user);
       setPingToken(fwToken);
@@ -3495,6 +3551,7 @@ export default function PulseApp() {
           }
           // Tell service worker the user's email for background polling
           swPost({ type: 'SET_USER_EMAIL', email: fwUser.email });
+          serviceWorkerAuthPayloadWithKey().then((payload) => swPost(payload)).catch(() => {});
           // Also send current todo items so SW can check due dates when app is closed
           try {
             const stored = localStorage.getItem('pulse_todo_items');
@@ -3523,7 +3580,7 @@ export default function PulseApp() {
       if (document.visibilityState === 'visible' && mainTab === 'ping' && pingScreen === 'chat') return; // Already in chat, no need
       try {
         const safeEmail = pingMe.email.replace(/[.@]/g, '_');
-        const res = await fetch(`${PING_BASE}/notifications/${safeEmail}.json`);
+        const res = await pingFetch(`notifications/${safeEmail}.json`);
         if (!res.ok) return;
         const data = await res.json();
         if (!data) return;
@@ -3750,11 +3807,14 @@ export default function PulseApp() {
 
   // Trigger Google OAuth for Family Workspace
   function fwGoogleLogin() {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    sessionStorage.setItem("pulse_fw_nonce", nonce);
     const params = new URLSearchParams({
       client_id: FAMILY_CLIENT_ID,
       redirect_uri: window.location.origin + window.location.pathname,
-      response_type: "token",
+      response_type: "token id_token",
       scope: FAMILY_SCOPES,
+      nonce,
       prompt: "consent",
       include_granted_scopes: "true",
     });
@@ -3769,7 +3829,9 @@ export default function PulseApp() {
       sessionStorage.removeItem("pulse_fw_oauth");
       const params = new URLSearchParams(hash.replace("#","?"));
       const token  = params.get("access_token");
+      const idToken = params.get("id_token");
       const expiresIn = parseInt(params.get("expires_in") || "3600", 10);
+      if (idToken) signInWithGoogleIdToken(idToken, sessionStorage.getItem("pulse_fw_nonce"));
       if (token) {
         setFwToken(token);
         localStorage.setItem("pulse_fw_token", token);
@@ -4127,6 +4189,9 @@ export default function PulseApp() {
   // Sign out of Family Workspace
   function fwSignOut() {
     ["pulse_fw_user","pulse_fw_token","pulse_fw_role","pulse_fw_workspace","pulse_fw_shared_key"].forEach(k => localStorage.removeItem(k));
+    clearFirebaseSession();
+    setHouseholdId("");
+    setFirebaseNotice("");
     setFwUser(null); setFwToken(null); setFwRole(null); setFwWorkspace(null); setFwMembers([]); setFwSharedFolderKey(null);
     setOnboardingStep("splash");
   }
@@ -4226,7 +4291,7 @@ export default function PulseApp() {
       folderId = await pingCreateDriveFolder(folderName, token).catch(()=>null);
       if (!folderId) return;
       // Store folder ID in Firebase so other user can find it
-      fetch(`${PING_CHATS}/${chatId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ folderId, folderName }) }).catch(()=>{});
+      pingFetch(`chats/${chatId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ folderId, folderName }) }).catch(()=>{});
     }
     const newFileId = await pingWriteDriveFile(folderId, "messages.json", encrypted, fileId, token).catch(()=>null);
     if (newFileId) setPingDriveFiles(p=>({...p,[chatId]:newFileId}));
@@ -4254,7 +4319,7 @@ export default function PulseApp() {
         // If no encrypted content returned, keep existing messages — do NOT clear
       } else {
         // Folder not found in own Drive — check Firebase for folder reference from other user
-        const chatData = await fetch(`${PING_CHATS}/${chat.id}.json`).then(r=>r.json()).catch(()=>null);
+        const chatData = await pingFetch(`chats/${chat.id}.json`).then(r=>r.ok?r.json():null).catch(()=>null);
         if (chatData?.folderId) {
           const q3 = encodeURIComponent(`'${chatData.folderId}' in parents and name='messages.json' and trashed=false`);
           const res2 = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q3}&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
@@ -4303,7 +4368,7 @@ export default function PulseApp() {
     for (const recipientEmail of recipients) {
       const safeEmail = recipientEmail.replace(/[.@]/g, '_');
       const notifKey = `${ts}_${pingMe.id || pingMe.email.replace(/[^a-zA-Z0-9]/g,'')}`;
-      fetch(`${PING_BASE}/notifications/${safeEmail}/${notifKey}.json`, {
+      pingFetch(`notifications/${safeEmail}/${notifKey}.json`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4317,7 +4382,7 @@ export default function PulseApp() {
       }).catch(()=>{});
     }
     // Legacy notify flag
-    fetch(`${PING_CHATS}/${pingActiveChat.id}/notify.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ from: pingMe.email, ts }) }).catch(()=>{});
+    pingFetch(`chats/${pingActiveChat.id}/notify.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ from: pingMe.email, ts }) }).catch(()=>{});
   }
 
   function pingChatId(emailA, emailB) {
@@ -4348,7 +4413,7 @@ export default function PulseApp() {
       }
     }
     const group = { name, color, members, createdBy: pingMe.email, folderId, folderName, createdAt: Date.now() };
-    const res   = await fetch(`${PING_GROUPS}.json`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(group) }).catch(()=>null);
+    const res   = await pingFetch("groups.json", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(group) }).catch(()=>null);
     const d     = res ? await res.json() : null;
     const chat  = { type:"group", id: d?.name||groupId, name, color, members, folderId };
     setPingGroups(prev => [...prev, { ...chat, lastMsg:"", lastTs: Date.now() }]);
@@ -4361,8 +4426,8 @@ export default function PulseApp() {
   async function pingLoadUsers() {
     try {
       const [ur, pr] = await Promise.all([
-        fetch(`${PING_USERS}.json`).then(r=>r.ok?r.json():null),
-        fetch(`${PING_PRESENCE}.json`).then(r=>r.ok?r.json():null),
+        pingFetch("users.json").then(r=>r.ok?r.json():null),
+        pingFetch("presence.json").then(r=>r.ok?r.json():null),
       ]);
       if (pr) setPingOnline(pr);
       // Build contact list from family members (fwMembers) — not all global Firebase users
@@ -4384,13 +4449,13 @@ export default function PulseApp() {
 
   async function pingUpdatePresence() {
     if (!pingMe) return;
-    fetch(`${PING_PRESENCE}/${pingMe.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(Date.now()) }).catch(()=>{});
+    pingFetch(`presence/${pingMe.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(Date.now()) }).catch(()=>{});
   }
 
   async function pingLoadChats() {
     if (!pingMe) return;
     try {
-      const gr = await fetch(`${PING_GROUPS}.json`).then(r=>r.ok?r.json():null);
+      const gr = await pingFetch("groups.json").then(r=>r.ok?r.json():null);
       if (gr) {
         const myGroups = Object.entries(gr)
           .filter(([,g])=>g.members?.includes(pingMe.email))
@@ -4744,6 +4809,12 @@ export default function PulseApp() {
 
       {/* App Root */}
       <div style={{width:"100%",minHeight:"100dvh",background:T.bg,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {firebaseNotice && (
+          <div style={{background:"#7C2D12",color:"#fff",padding:"10px 14px",display:"flex",alignItems:"center",gap:10,fontSize:13,lineHeight:1.4}}>
+            <span style={{flex:1}}>{firebaseNotice}</span>
+            <button type="button" onClick={fwGoogleLogin} style={{background:"#fff",color:"#7C2D12",border:"none",borderRadius:8,padding:"6px 10px",fontWeight:700,cursor:"pointer"}}>Sign in again</button>
+          </div>
+        )}
 
         {/* ─── ONBOARDING SCREENS ────────────────────────────────────────*/}
         {onboardingStep !== null && (
