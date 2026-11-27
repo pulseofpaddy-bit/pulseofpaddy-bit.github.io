@@ -1,17 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { calendarDateFromText, parseDate } from "./src/dates.js";
 import { checkIsOpen } from "./src/openingHours.js";
-import { folderKey, healthCollection, pingCollection, setHouseholdId } from "./src/rtdbPaths.js";
+import { folderKey, healthCollection, setHouseholdId } from "./src/rtdbPaths.js";
 import { canViewHealthLogs, inferRelation } from "./src/healthAccess.js";
 import {
-  claimLegacyHousehold,
   clearFirebaseSession,
   firebaseEmail,
   getFirebaseIdToken,
   installRtdbFetch,
-  migrateLegacyPingme,
   registerHouseholdMember,
-  serviceWorkerAuthPayloadWithKey,
   signInWithGoogleIdToken,
   subscribeFirebaseNotice,
   subscribeFirebaseSession,
@@ -19,16 +16,20 @@ import {
 
 installRtdbFetch();
 
-function pingFetch(path, init) {
-  const url = pingCollection(path);
-  if (!url) {
-    return Promise.resolve(new Response(JSON.stringify({ error: "No household yet" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    }));
-  }
-  return fetch(url, init);
+function clearPingLocalData() {
+  try {
+    const drop = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("pulse_ping_")) drop.push(key);
+    }
+    drop.forEach((key) => localStorage.removeItem(key));
+    sessionStorage.removeItem("pulse_ping_pass");
+    sessionStorage.removeItem("pulse_ping_oauth");
+  } catch {}
 }
+clearPingLocalData();
+
 
 // Firebase REST replies with HTTP 401 and `{error:"Permission denied"}` when
 // rules reject the caller. That object must not be stored as list data.
@@ -150,30 +151,6 @@ const FAMILY_SCOPES      = "openid https://www.googleapis.com/auth/drive.file ht
 const WORKSPACE_FOLDER   = "PulseApp_Workspace";
 const WORKSPACE_FILES    = { grocery:"Grocery.json", todos:"Todo.json", appointments:"Appointments.json", members:"Members.json", contacts:"Contacts.json", payReminders:"PayReminders.json", moneyLent:"MoneyLent.json" };
 
-// ─── PINGME CONFIG ────────────────────────────────────────
-// Chat URLs are built per household in pingFetch (src/rtdbPaths.js).
-const FAMILY_BASE          = "https://pulse-family-default-rtdb.firebaseio.com/family";
-const FAMILY_MEMBER_LOOKUP = "https://pulse-family-default-rtdb.firebaseio.com/member_lookup"; // maps member email -> head email for shared key lookup
-
-function pingAvatar(name="?", color="#FF3B5C") {
-  return (
-    <div style={{width:42,height:42,borderRadius:21,background:color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:"#fff",flexShrink:0}}>
-      {name.charAt(0).toUpperCase()}
-    </div>
-  );
-}
-
-function pingTimeStr(ts) {
-  if (!ts) return "";
-  const d = new Date(ts), now = new Date();
-  const diff = now - d;
-  if (diff < 60000) return "just now";
-  if (diff < 3600000) return `${Math.floor(diff/60000)}m`;
-  if (diff < 86400000) return d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:true});
-  return d.toLocaleDateString([],{month:"short",day:"numeric"});
-}
-
-const PING_COLORS = ["#FF3B5C","#7C3AED","#00C2FF","#10B981","#F59E0B","#EC4899","#06B6D4","#84CC16"];
 
 const GROCERY_STORES_DEFAULT = [
   { id:"all",          label:"All",          emoji:"🔍️", color:"#888" },
@@ -708,7 +685,7 @@ export default function PulseApp() {
   useEffect(() => subscribeFirebaseNotice(setFirebaseNotice), []);
   useEffect(() => subscribeFirebaseSession(() => setFbSession((n) => n + 1)), []);
 
-  // Join this household in Firebase, then copy old chat data once. Old /pingme is not deleted.
+  // Record this person on the household so shared lists can sync.
   useEffect(() => {
     if (!fwUser?.email || !activeHouseholdId) return;
     let cancel = false;
@@ -723,11 +700,6 @@ export default function PulseApp() {
         gender: meNow?.gender || "",
         relation: inferRelation({ ...(meNow || {}), role: meNow?.role || fwRole }),
       });
-      if ((fwRole || "") === "head") await claimLegacyHousehold(activeHouseholdId);
-      await migrateLegacyPingme(activeHouseholdId);
-      if (navigator.serviceWorker?.controller) {
-        navigator.serviceWorker.controller.postMessage(await serviceWorkerAuthPayloadWithKey());
-      }
     })();
     return () => { cancel = true; };
   }, [fwUser?.email, activeHouseholdId, fwRole, fbSession, fwMembers]);
@@ -2090,15 +2062,6 @@ export default function PulseApp() {
       try { await fetch(`${fbUrl}/${item.fbId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ text, priority: newPriority, dueDate: newDueDate }) }); } catch(e) {}
     }
   }
-  // ─── GOOGLE OAUTH / RESERVATION SYNC MULTI-ACCOUNT (up to ────────────────────────────────────────
-  // ⚠️  SETUP: Replace with your Google Cloud OAuth Client ID
-  // ─── Steps New Project APIs & Services ────────────────────────────────────────
-  //        → Enable "Gmail API" + "Google Calendar API"
-  //        ─── Credentials OAuth Client ID Web application ────────────────────────────────────────
-  //        → Authorised JS origins: your app URL
-  const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
-  const GOOGLE_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly email profile openid";
-  const MAX_ACCOUNTS = 5;
 
   const [gAccounts, setGAccounts] = useState(() => {
     try { return JSON.parse(localStorage.getItem("pulse_gaccounts") || "[]"); } catch(e) { return []; }
@@ -2123,63 +2086,6 @@ export default function PulseApp() {
       return updated;
     });
   }, [fwUser?.email, fwToken]);
-  function googleAddAccount() {
-    if (gAccounts.length >= MAX_ACCOUNTS) return;
-    if (GOOGLE_CLIENT_ID === "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com") {
-      alert("⚠️ Setup required\n\nAdd your Google OAuth Client ID to the code first:\n\n1. Go to console.cloud.google.com\n2. Create a project → Enable Gmail API + Google Calendar API\n3. Credentials → OAuth 2.0 Client ID → Web app\n4. Copy Client ID and replace YOUR_GOOGLE_CLIENT_ID in the code");
-      return;
-    }
-    const params = new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
-      redirect_uri: window.location.origin + window.location.pathname,
-      response_type: "token",
-      scope: GOOGLE_SCOPES,
-      prompt: "select_account consent",
-    });
-    sessionStorage.setItem("pulse_adding_account", "1");
-    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-  }
-
-  function googleRemoveAccount(email) {
-    saveGAccounts(gAccounts.filter(a => a.email !== email));
-    setGSyncMsg(prev => { const n={...prev}; delete n[email]; return n; });
-  }
-
-  // Catch OAuth redirect token from URL hash
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (hash.includes("access_token") && sessionStorage.getItem("pulse_adding_account")) {
-      sessionStorage.removeItem("pulse_adding_account");
-      const params = new URLSearchParams(hash.replace("#","?"));
-      const token  = params.get("access_token");
-      if (token) {
-        // Fetch email profile
-        fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
-          headers: { Authorization: `Bearer ${token}` }
-        }).then(r => r.json()).then(profile => {
-          const email = profile.email || `account_${Date.now()}`;
-          const existing = JSON.parse(localStorage.getItem("pulse_gaccounts") || "[]");
-          if (existing.find(a => a.email === email)) {
-            // Update token for existing account
-            const updated = existing.map(a => a.email === email ? { ...a, token } : a);
-            localStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
-            setGAccounts(updated);
-          } else {
-            const updated = [...existing, { email, token, name: profile.name || email, picture: profile.picture || "" }];
-            localStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
-            setGAccounts(updated);
-          }
-        }).catch(() => {
-          const existing = JSON.parse(localStorage.getItem("pulse_gaccounts") || "[]");
-          const email = `account_${Date.now()}`;
-          const updated = [...existing, { email, token, name: email }];
-          localStorage.setItem("pulse_gaccounts", JSON.stringify(updated));
-          setGAccounts(updated);
-        });
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    }
-  }, []);
 
   // ─── RESERVATION EMAIL PARSER ────────────────────────────────────────
   // Classifies Gmail booking confirmation emails into RESV_TYPES tabs.
@@ -2532,7 +2438,6 @@ export default function PulseApp() {
   const GROCERY_FB   = `${FAMILY_BASE}/${_fwKey}/grocery`;
   const TODOS_FB     = `${FAMILY_BASE}/${_fwKey}/todos`;
   const APPTS_FB     = `${FAMILY_BASE}/${_fwKey}/appointments`;
-  const TODO_URL = "https://pulse-family-default-rtdb.firebaseio.com/todos";
   const RESV_TYPES = [
     { id:"✈️ Flight",     label:"Flight",      emoji:"✈️", color:"#6366F1" },
     { id:"🏨 Hotel",       label:"Hotel",       emoji:"🏨", color:"#10B981" },
@@ -3426,135 +3331,6 @@ export default function PulseApp() {
     try { await fetch(`${CLOTHING_URL}/${encodeURIComponent(id)}.json`, { method:"DELETE" }); } catch(e) {}
   }
 
-  // ─── PINGME STATE (v Google Login + Drive Storage + AES Encryption) ────────────────────────────────────────
-  const PING_GOOGLE_CLIENT_ID  = "360320151404-1miklman0sr6gends9nuuuggecauneea.apps.googleusercontent.com";
-  const PING_GOOGLE_SCOPES     = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
-
-  const [pingScreen, setPingScreen]         = useState("home"); // home|chat|newGroup|setPassword|login
-  const [pingMe, setPingMe]                 = useState(() => { try { return JSON.parse(localStorage.getItem("pulse_ping_user")||"null"); } catch { return null; } });
-  const [pingToken, setPingToken]           = useState(() => localStorage.getItem("pulse_ping_token")||"");
-  const [pingEncryptEnabled, setPingEncryptEnabled] = useState(() => localStorage.getItem("pulse_ping_encrypt") === "true");
-  const [pingPassword, setPingPassword]     = useState(() => sessionStorage.getItem("pulse_ping_pass")||"PulseDefaultKey2026");
-  const [pingPasswordInput, setPingPasswordInput] = useState("");
-  const [pingPasswordConfirm, setPingPasswordConfirm] = useState("");
-  const [pingUsers, setPingUsers]           = useState([]);
-  const [pingGroups, setPingGroups]         = useState([]);
-  const [pingChats, setPingChats]           = useState([]);
-  const [pingActiveChat, setPingActiveChat] = useState(null);
-  const [pingMessages, setPingMessages]     = useState([]);
-  const [pingInput, setPingInput]           = useState("");
-  const [pingNewGroup, setPingNewGroup]     = useState({name:"", members:[]});
-  const [pingOnline, setPingOnline]         = useState({});
-  const [pingLoading, setPingLoading]       = useState(false);
-  const [pingError, setPingError]           = useState("");
-  const [pingMenuOpen, setPingMenuOpen]     = useState(false);
-  const [pingDriveFiles, setPingDriveFiles] = useState({}); // {chatId: fileId}
-  const pingMsgRef = useRef(null);
-
-  // ─── AES- Encryption ────────────────────────────────────────
-  async function pingDeriveKey(password) {
-    const enc  = new TextEncoder();
-    const raw  = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
-    return crypto.subtle.deriveKey(
-      { name:"PBKDF2", salt: enc.encode("PulseAppPingMeSalt"), iterations:100000, hash:"SHA-256" },
-      raw, { name:"AES-GCM", length:256 }, false, ["encrypt","decrypt"]
-    );
-  }
-
-  async function pingEncrypt(text, password) {
-    const key  = await pingDeriveKey(password);
-    const iv   = crypto.getRandomValues(new Uint8Array(12));
-    const enc  = new TextEncoder();
-    const ct   = await crypto.subtle.encrypt({ name:"AES-GCM", iv }, key, enc.encode(text));
-    const buf  = new Uint8Array(iv.byteLength + ct.byteLength);
-    buf.set(iv); buf.set(new Uint8Array(ct), iv.byteLength);
-    // Use chunked conversion to avoid call-stack overflow for large buffers
-    let binary = "";
-    const chunkSize = 8192;
-    for (let i = 0; i < buf.length; i += chunkSize) {
-      binary += String.fromCharCode(...buf.subarray(i, i + chunkSize));
-    }
-    return btoa(binary);
-  }
-
-  async function pingDecrypt(b64, password) {
-    try {
-      const key  = await pingDeriveKey(password);
-      const buf  = Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
-      const iv   = buf.slice(0,12);
-      const ct   = buf.slice(12);
-      const pt   = await crypto.subtle.decrypt({ name:"AES-GCM", iv }, key, ct);
-      return new TextDecoder().decode(pt);
-    } catch { return null; }
-  }
-
-  // ─── Google OAuth ────────────────────────────────────────
-  function pingGoogleLogin() {
-    const params = new URLSearchParams({
-      client_id: PING_GOOGLE_CLIENT_ID,
-      redirect_uri: window.location.origin + window.location.pathname,
-      response_type: "token",
-      scope: PING_GOOGLE_SCOPES,
-      prompt: "select_account",
-    });
-    sessionStorage.setItem("pulse_ping_oauth", "1");
-    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-  }
-
-  // Catch OAuth callback
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (hash.includes("access_token") && sessionStorage.getItem("pulse_ping_oauth")) {
-      sessionStorage.removeItem("pulse_ping_oauth");
-      const params = new URLSearchParams(hash.replace("#","?"));
-      const token  = params.get("access_token");
-      if (token) {
-        setPingToken(token);
-        localStorage.setItem("pulse_ping_token", token);
-        // Fetch Google profile
-        fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
-          headers:{ Authorization:`Bearer ${token}` }
-        }).then(r=>r.json()).then(profile=>{
-          const user = { email: profile.email, name: profile.name, photo: profile.picture, id: profile.id };
-          setPingMe(user);
-          localStorage.setItem("pulse_ping_user", JSON.stringify(user));
-          // Register in Firebase
-          pingFetch(`users/${profile.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
-          // Only prompt for password if encryption is enabled
-          if (localStorage.getItem("pulse_ping_encrypt") === "true" && !sessionStorage.getItem("pulse_ping_pass")) {
-            setMainTab("ping");
-            setPingScreen("setPassword");
-          }
-        }).catch(()=>{});
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    }
-  }, []);
-
-  // ─── Auto-bridge existing Google auth into PingMe ────────────────────────────────────────
-  useEffect(() => {
-    if (!fwUser || !fwToken) return;
-    const user = { email: fwUser.email, name: fwUser.name, photo: fwUser.photo, id: fwUser.id || fwUser.email.replace(/[^a-zA-Z0-9]/g,"") };
-    // Always register/refresh in Firebase whenever fwUser is available (on every app load)
-    // This ensures the user appears in other family members' contact lists
-    pingFetch(`users/${user.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...user, updatedAt: Date.now()}) }).catch(()=>{});
-    if (!pingMe) {
-      setPingMe(user);
-      setPingToken(fwToken);
-      localStorage.setItem("pulse_ping_user", JSON.stringify(user));
-      localStorage.setItem("pulse_ping_token", fwToken);
-      if (mainTab === "ping") {
-        if (pingEncryptEnabled && !sessionStorage.getItem("pulse_ping_pass")) {
-          setPingScreen("setPassword");
-        } else {
-          setPingScreen("home");
-        }
-      }
-    }
-  }, [fwUser?.email, fwToken]);
-
-  // ─── PingMe Notifications ────────────────────────────────────────────────
-  const pingLastNotifTs = useRef(Date.now());
 
   // Register service worker and request notification permission when user logs in
   useEffect(() => {
@@ -3570,7 +3346,6 @@ export default function PulseApp() {
           }
           // Tell service worker the user's email for background polling
           swPost({ type: 'SET_USER_EMAIL', email: fwUser.email });
-          serviceWorkerAuthPayloadWithKey().then((payload) => swPost(payload)).catch(() => {});
           // Also send current todo items so SW can check due dates when app is closed
           try {
             const stored = localStorage.getItem('pulse_todo_items');
@@ -3591,103 +3366,7 @@ export default function PulseApp() {
     }
   }, [fwUser?.email]);
 
-  // Poll Firebase for new notifications every 15 seconds when app is open
-  useEffect(() => {
-    if (!pingMe) return;
-    const checkNotifs = async () => {
-      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-      if (document.visibilityState === 'visible' && mainTab === 'ping' && pingScreen === 'chat') return; // Already in chat, no need
-      try {
-        const safeEmail = pingMe.email.replace(/[.@]/g, '_');
-        const res = await pingFetch(`notifications/${safeEmail}.json`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data) return;
-        const entries = Object.entries(data)
-          .map(([k, v]) => ({ key: k, ...v }))
-          .filter(n => n.ts > pingLastNotifTs.current);
-        for (const n of entries) {
-          showNotification(`💬 ${n.fromName || 'Family member'}`, {
-            body: n.preview ? `"${n.preview}"` : 'Sent you a message in PingMe',
-            icon: '/icon-192.png',
-            badge: '/icon-192.png',
-            tag: `pingme-${n.chatId}`,
-          });
-        }
-        if (entries.length > 0) {
-          pingLastNotifTs.current = Math.max(...entries.map(n => n.ts));
-        }
-      } catch(e) {}
-    };
-    checkNotifs();
-    const interval = setInterval(checkNotifs, 15000);
-    return () => clearInterval(interval);
-  }, [pingMe?.email]);
 
-  // ─── Drive Helpers ────────────────────────────────────────────────
-  async function pingCreateDriveFolder(folderName, token) {
-    const res = await fetch("https://www.googleapis.com/drive/v3/files", {
-      method:"POST",
-      headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" },
-      body: JSON.stringify({ name: folderName, mimeType:"application/vnd.google-apps.folder" })
-    });
-    const d = await res.json();
-    return d.id;
-  }
-
-  async function pingShareFolder(folderId, email, token) {
-    await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions`, {
-      method:"POST",
-      headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" },
-      body: JSON.stringify({ role:"writer", type:"user", emailAddress: email })
-    }).catch(()=>{});
-  }
-
-  async function pingWriteDriveFile(folderId, fileName, content, fileId, token) {
-    if (fileId) {
-      // Update existing file
-      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-        method:"PATCH",
-        headers:{ Authorization:`Bearer ${token}`, "Content-Type":"text/plain" },
-        body: content
-      });
-      return fileId;
-    } else {
-      // Create new file in folder
-      const meta = { name: fileName, parents:[folderId] };
-      const form = new FormData();
-      form.append("metadata", new Blob([JSON.stringify(meta)], {type:"application/json"}));
-      form.append("file", new Blob([content], {type:"application/json"}));
-      const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-        method:"POST", headers:{ Authorization:`Bearer ${token}` }, body: form
-      });
-      const d = await res.json();
-      return d.id;
-    }
-  }
-
-  async function pingReadDriveFile(fileId, token) {
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers:{ Authorization:`Bearer ${token}` }
-    });
-    return res.ok ? await res.text() : null;
-  }
-
-  async function pingFindDriveFile(folderName, fileName, token) {
-    const q1 = encodeURIComponent(`name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q1}&includeItemsFromAllDrives=true&supportsAllDrives=true`, {
-      headers:{ Authorization:`Bearer ${token}` }
-    });
-    const d = await res.json();
-    const folder = d.files?.[0];
-    if (!folder) return null;
-    const q2 = encodeURIComponent(`'${folder.id}' in parents and name='${fileName}' and trashed=false`);
-    const res2 = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q2}&includeItemsFromAllDrives=true&supportsAllDrives=true`, {
-      headers:{ Authorization:`Bearer ${token}` }
-    });
-    const d2 = await res2.json();
-    return { folderId: folder.id, fileId: d2.files?.[0]?.id||null };
-  }
 
   // ─── FAMILY WORKSPACE DRIVE UTILITIES ────────────────────────────────────────
 
@@ -4086,7 +3765,6 @@ export default function PulseApp() {
             if (s.secondCountry)   { const c = SECOND_COUNTRY_OPTIONS.find(x => x.key === s.secondCountry); if (c) { setSecondCountry(c); localStorage.setItem("pulse_second_country", s.secondCountry); } }
             if (s.pcCycleLength)   { setPcCycleLength(parseInt(s.pcCycleLength,10)); localStorage.setItem("pulse_pc_cycle", s.pcCycleLength); }
             if (s.pcPeriodLength)  { setPcPeriodLength(parseInt(s.pcPeriodLength,10)); localStorage.setItem("pulse_pc_period_len", s.pcPeriodLength); }
-            if (s.pingEncrypt !== undefined) { setPingEncryptEnabled(s.pingEncrypt === true); localStorage.setItem("pulse_ping_encrypt", s.pingEncrypt ? "true" : "false"); }
           } catch(e) {}
         }).catch(()=>{});
       }).catch(()=>{});
@@ -4369,217 +4047,6 @@ export default function PulseApp() {
     setOnboardingStep(null);
   }
 
-  // ─── Chat Functions ────────────────────────────────────────
-  async function pingSaveMessages(chatId, messages, token) {
-    if (!token || !pingPassword) return;
-    const plain   = JSON.stringify(messages);
-    const encrypted = await pingEncrypt(plain, pingPassword);
-    const folderName = `PingMe_${chatId}`;
-    // Find or create folder+file
-    let found = await pingFindDriveFile(folderName, "messages.json", token).catch(()=>null);
-    let folderId = found?.folderId;
-    let fileId   = found?.fileId || pingDriveFiles[chatId];
-    if (!folderId) {
-      folderId = await pingCreateDriveFolder(folderName, token).catch(()=>null);
-      if (!folderId) return;
-      // Store folder ID in Firebase so other user can find it
-      pingFetch(`chats/${chatId}.json`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ folderId, folderName }) }).catch(()=>{});
-    }
-    const newFileId = await pingWriteDriveFile(folderId, "messages.json", encrypted, fileId, token).catch(()=>null);
-    if (newFileId) setPingDriveFiles(p=>({...p,[chatId]:newFileId}));
-  }
-
-  async function pingLoadMessages(chat) {
-    if (!chat || !pingToken || !pingPassword) return;
-    try {
-      setPingLoading(true);
-      const folderName = `PingMe_${chat.id}`;
-      const found = await pingFindDriveFile(folderName, "messages.json", pingToken);
-      if (found?.fileId) {
-        const encrypted = await pingReadDriveFile(found.fileId, pingToken);
-        if (encrypted) {
-          const plain = await pingDecrypt(encrypted, pingPassword);
-          // Only update messages if we successfully decrypted real content
-          if (plain) {
-            try {
-              const parsed = JSON.parse(plain);
-              if (Array.isArray(parsed)) setPingMessages(parsed);
-            } catch {}
-          }
-          // If decryption failed, keep existing messages — do NOT clear
-        }
-        // If no encrypted content returned, keep existing messages — do NOT clear
-      } else {
-        // Folder not found in own Drive — check Firebase for folder reference from other user
-        const chatData = await pingFetch(`chats/${chat.id}.json`).then(r=>r.ok?r.json():null).catch(()=>null);
-        if (chatData?.folderId) {
-          const q3 = encodeURIComponent(`'${chatData.folderId}' in parents and name='messages.json' and trashed=false`);
-          const res2 = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q3}&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
-            headers:{ Authorization:`Bearer ${pingToken}` }
-          });
-          const d2 = await res2.json();
-          if (d2.files?.[0]?.id) {
-            const encrypted = await pingReadDriveFile(d2.files[0].id, pingToken);
-            if (encrypted) {
-              const plain = await pingDecrypt(encrypted, pingPassword);
-              if (plain) {
-                try {
-                  const parsed = JSON.parse(plain);
-                  if (Array.isArray(parsed)) setPingMessages(parsed);
-                } catch {}
-              }
-            }
-          }
-          // If folder exists in Firebase but file not found yet, keep existing messages — do NOT clear
-        }
-        // If no Firebase reference either, this is a brand new chat — keep existing messages (may be optimistic)
-        // NEVER call setPingMessages([]) here — it would wipe optimistically-added messages
-      }
-    } catch(e) {
-      // On error, keep existing messages — do NOT clear
-      console.warn("pingLoadMessages error:", e);
-    }
-    setPingLoading(false);
-  }
-
-  async function pingSend() {
-    const text = pingInput.trim();
-    if (!text || !pingActiveChat || !pingMe || !pingPassword) return;
-    setPingInput("");
-    const ts = Date.now();
-    const msg  = { id: ts, text, from: pingMe.email, fromName: pingMe.name, ts, read: false };
-    const newMsgs = [...pingMessages, msg];
-    setPingMessages(newMsgs);
-    setTimeout(()=>{ if(pingMsgRef.current) pingMsgRef.current.scrollTop=pingMsgRef.current.scrollHeight; },50);
-    // Save to Drive — messages are already shown optimistically above
-    await pingSaveMessages(pingActiveChat.id, newMsgs, pingToken);
-    // Write notification record for each recipient so they get browser/push notification
-    const recipients = pingActiveChat.type === 'group'
-      ? (pingActiveChat.members || []).filter(e => e !== pingMe.email)
-      : [pingActiveChat.otherEmail].filter(Boolean);
-    for (const recipientEmail of recipients) {
-      const safeEmail = recipientEmail.replace(/[.@]/g, '_');
-      const notifKey = `${ts}_${pingMe.id || pingMe.email.replace(/[^a-zA-Z0-9]/g,'')}`;
-      pingFetch(`notifications/${safeEmail}/${notifKey}.json`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chatId: pingActiveChat.id,
-          chatName: pingActiveChat.name,
-          from: pingMe.email,
-          fromName: pingMe.name,
-          preview: text.length > 60 ? text.slice(0, 60) + '…' : text,
-          ts,
-        })
-      }).catch(()=>{});
-    }
-    // Legacy notify flag
-    pingFetch(`chats/${pingActiveChat.id}/notify.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ from: pingMe.email, ts }) }).catch(()=>{});
-  }
-
-  function pingChatId(emailA, emailB) {
-    return [emailA, emailB].sort().map(e=>e.replace(/[.@]/g,"_")).join("__");
-  }
-
-  function pingOpenDm(user) {
-    const id   = pingChatId(pingMe.email, user.email);
-    const chat = { type:"dm", id, name: user.name, color: user.color||"#7C3AED", otherEmail: user.email };
-    setPingActiveChat(chat);
-    setPingScreen("chat");
-    pingLoadMessages(chat);
-  }
-
-  async function pingCreateGroup() {
-    const name = pingNewGroup.name.trim();
-    if (!name || pingNewGroup.members.length === 0 || !pingToken) return;
-    const color   = PING_COLORS[Math.floor(Math.random()*PING_COLORS.length)];
-    const members = [...pingNewGroup.members, pingMe.email];
-    const groupId = `grp_${Date.now()}`;
-    // Create shared Drive folder
-    const folderName = `PingMe_${groupId}`;
-    const folderId   = await pingCreateDriveFolder(folderName, pingToken).catch(()=>null);
-    // Share with all members
-    if (folderId) {
-      for (const email of pingNewGroup.members) {
-        await pingShareFolder(folderId, email, pingToken);
-      }
-    }
-    const group = { name, color, members, createdBy: pingMe.email, folderId, folderName, createdAt: Date.now() };
-    const res   = await pingFetch("groups.json", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(group) }).catch(()=>null);
-    const d     = res ? await res.json() : null;
-    const chat  = { type:"group", id: d?.name||groupId, name, color, members, folderId };
-    setPingGroups(prev => [...prev, { ...chat, lastMsg:"", lastTs: Date.now() }]);
-    setPingNewGroup({name:"", members:[]});
-    setPingActiveChat(chat);
-    setPingMessages([]);
-    setPingScreen("chat");
-  }
-
-  async function pingLoadUsers() {
-    try {
-      const [ur, pr] = await Promise.all([
-        pingFetch("users.json").then(r=>r.ok?r.json():null),
-        pingFetch("presence.json").then(r=>r.ok?r.json():null),
-      ]);
-      if (pr) setPingOnline(pr);
-      // Build contact list from family members (fwMembers) — not all global Firebase users
-      // This ensures only YOUR family appears in contacts
-      const familyEmails = (fwMembers||[]).map(m=>m.email).filter(e=>e!==pingMe?.email);
-      const firebaseUsers = ur ? Object.values(ur) : [];
-      // For each family member, use Firebase data if available, else fall back to fwMembers data
-      const contacts = familyEmails.map(email => {
-        const fb = firebaseUsers.find(u=>u.email===email);
-        const fm = (fwMembers||[]).find(m=>m.email===email);
-        if (fb) return fb;
-        // Not in Firebase yet — create a placeholder from fwMembers so they still appear
-        if (fm) return { email: fm.email, name: fm.name, photo: fm.photo||null, id: fm.email.replace(/[^a-zA-Z0-9]/g,""), updatedAt: 0 };
-        return null;
-      }).filter(Boolean);
-      setPingUsers(contacts);
-    } catch(e) {}
-  }
-
-  async function pingUpdatePresence() {
-    if (!pingMe) return;
-    pingFetch(`presence/${pingMe.id}.json`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(Date.now()) }).catch(()=>{});
-  }
-
-  async function pingLoadChats() {
-    if (!pingMe) return;
-    try {
-      const gr = await pingFetch("groups.json").then(r=>r.ok?r.json():null);
-      if (gr) {
-        const myGroups = Object.entries(gr)
-          .filter(([,g])=>g.members?.includes(pingMe.email))
-          .map(([id,g])=>({ type:"group", id, name:g.name, color:g.color, members:g.members, folderId:g.folderId, lastMsg:"", lastTs:g.createdAt||0 }));
-        setPingGroups(myGroups);
-      }
-    } catch(e) {}
-  }
-
-  // Polling
-  useEffect(() => {
-    if (mainTab !== "ping" || !pingMe) return;
-    pingLoadUsers();
-    pingLoadChats();
-    pingUpdatePresence();
-    const interval = setInterval(()=>{ pingUpdatePresence(); pingLoadUsers(); }, 30000);
-    return () => clearInterval(interval);
-  }, [mainTab, pingMe?.email]);
-
-  // Refresh contacts when family member list changes (e.g. after Drive sync)
-  useEffect(() => {
-    if (mainTab === "ping" && pingMe && fwMembers.length > 0) {
-      pingLoadUsers();
-    }
-  }, [fwMembers.length]);
-
-  useEffect(() => {
-    if (mainTab !== "ping" || pingScreen !== "chat" || !pingActiveChat) return;
-    // Poll every 10s — 5s was too fast and caused race conditions with Drive API indexing
-    const interval = setInterval(()=>pingLoadMessages(pingActiveChat), 10000);
-    return () => clearInterval(interval);
-  }, [mainTab, pingScreen, pingActiveChat?.id]);
 
   // ─── CALC STATE ────────────────────────────────────────
   const [calcTab, setCalcTab] = useState("discount");
@@ -5245,15 +4712,6 @@ export default function PulseApp() {
                       <div style={subStyle}>TOOLS</div>
                     </div>
 
-                    {/* PingMe */}
-                    <div onClick={()=>setMainTab("ping")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.55s both"}}>
-                      <div style={iconWrap("rgba(64,224,208,0.10)","rgba(64,224,208,0.15)")}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isDark?"#40E0D0":"#20B2AA"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                      </div>
-                      <div style={titleStyle}>PingMe</div>
-                      <div style={subStyle}>SECURE</div>
-                    </div>
-
                     {/* Period Calendar — only for female members */}
                     {canViewHealthLogs((fwMembers||[]).find(m=>m.email===fwUser?.email)) && (
                     <div onClick={()=>setMainTab("periodcal")} style={{...tileCardStyle,animation:"popIn 0.4s ease 0.6s both"}}>
@@ -5303,7 +4761,6 @@ export default function PulseApp() {
                 {key:null,label:"Home",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill={mainTab===null?(isDark?"#fff":"#000"):"none"} stroke={mainTab===null?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},
                 {key:"movies",label:"Movies",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={mainTab==="movies"?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>},
                 {key:"grocery",label:"Shop",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={mainTab==="grocery"?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>},
-                {key:"ping",label:"Chat",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={mainTab==="ping"?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>},
                 {key:"settings",label:"Settings",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={mainTab==="settings"?(isDark?"#fff":"#000"):(isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)")} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>}
               ].map(nav=>(
                 <div key={nav.key||"home"} onClick={()=>setMainTab(nav.key)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 12px",WebkitTapHighlightColor:"transparent"}}>
@@ -6802,267 +6259,6 @@ export default function PulseApp() {
           </>
         )}
 
-        {/* ─── PINGME SCREEN ────────────────────────────────────────*/}
-        {mainTab === "ping" && (
-          <>
-            {/* 1. Not logged in → Google Login */}
-            {!pingMe && (
-              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 24px",position:"relative"}}>
-                {/* Back button */}
-                <div onClick={()=>setMainTab(null)} style={{position:"absolute",top:12,left:12,cursor:"pointer",display:"flex",alignItems:"center",gap:6,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.05)",padding:"8px 16px 8px 10px",borderRadius:24,transition:"background 0.15s ease",zIndex:10}} title="Back to Home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.textMuted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg><span style={{fontSize:13,fontWeight:700,color:T.textMuted}}>Home</span></div>
-                <div style={{width:80,height:80,borderRadius:40,background:"#25D366",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:20}}>
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                </div>
-                <div style={{fontSize:26,fontWeight:700,color:T.text,marginBottom:8}}>PingMe</div>
-                <div style={{fontSize:13,color:T.textMuted,marginBottom:36,textAlign:"center",lineHeight:1.5}}>Chat with your family members<br/>right inside Pulse</div>
-                <div onClick={pingGoogleLogin} style={{display:"flex",alignItems:"center",gap:10,background:"#25D366",borderRadius:28,padding:"14px 32px",cursor:"pointer",boxShadow:"0 2px 12px rgba(37,211,102,0.3)"}}>
-                  <span style={{fontSize:15,fontWeight:700,color:"#fff"}}>Agree and Continue</span>
-                </div>
-              </div>
-            )}
-
-            {/* 2. Logged in but needs password (only if encryption enabled) */}
-            {pingMe && pingEncryptEnabled && !sessionStorage.getItem("pulse_ping_pass") && pingScreen === "setPassword" && (
-              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 24px",position:"relative"}}>
-                <div onClick={()=>setMainTab(null)} style={{position:"absolute",top:12,left:12,cursor:"pointer",display:"flex",alignItems:"center",gap:6,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.05)",padding:"8px 16px 8px 10px",borderRadius:24,transition:"background 0.15s ease",zIndex:10}} title="Back to Home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.textMuted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg><span style={{fontSize:13,fontWeight:700,color:T.textMuted}}>Home</span></div>
-                <div style={{fontSize:36,marginBottom:12}}>🔐</div>
-                <div style={{fontSize:18,fontWeight:900,color:T.text,fontFamily:"Georgia,serif",marginBottom:6}}>Set Chat Password</div>
-                <div style={{fontSize:12,color:T.textFaint,marginBottom:6,textAlign:"center"}}>This encrypts all your messages with AES-256.</div>
-                <div style={{fontSize:11,color:"#FF3B5C",marginBottom:24,textAlign:"center",background:"rgba(255,59,92,0.08)",padding:"8px 12px",borderRadius:10}}>⚠️ If you forget this password, your messages cannot be recovered.</div>
-                <div style={{width:"100%",maxWidth:300}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,background:isDark?"rgba(255,255,255,0.05)":"rgba(0,0,0,0.04)",borderRadius:12,padding:"8px 12px"}}>
-                    <span style={{fontSize:18}}>{pingMe.photo ? <img src={pingMe.photo} style={{width:28,height:28,borderRadius:14}} alt=""/> : "👤"}</span>
-                    <div>
-                      <div style={{fontSize:12,fontWeight:700,color:T.text}}>{pingMe.name}</div>
-                      <div style={{fontSize:10,color:T.textFaint}}>{pingMe.email}</div>
-                    </div>
-                  </div>
-                  <input value={pingPasswordInput} onChange={e=>setPingPasswordInput(e.target.value)} type="password" placeholder="Create a strong password"
-                    style={{width:"100%",boxSizing:"border-box",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:T.text,outline:"none",marginBottom:10}}/>
-                  <input value={pingPasswordConfirm} onChange={e=>setPingPasswordConfirm(e.target.value)} type="password" placeholder="Confirm password"
-                    style={{width:"100%",boxSizing:"border-box",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:T.text,outline:"none",marginBottom:16}}/>
-                  {pingError && <div style={{fontSize:11,color:"#FF3B5C",textAlign:"center",marginBottom:10}}>{pingError}</div>}
-                  <div onClick={()=>{
-                    if (!pingPasswordInput) { setPingError("Please enter a password"); return; }
-                    if (pingPasswordInput !== pingPasswordConfirm) { setPingError("Passwords don't match"); return; }
-                    if (pingPasswordInput.length < 6) { setPingError("Password must be at least 6 characters"); return; }
-                    sessionStorage.setItem("pulse_ping_pass", pingPasswordInput);
-                    setPingPassword(pingPasswordInput);
-                    setPingPasswordInput("");
-                    setPingPasswordConfirm("");
-                    setPingError("");
-                    setPingScreen("home");
-                  }} style={{background:"linear-gradient(135deg,#22C55E,#10B981)",borderRadius:16,padding:"13px",textAlign:"center",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff"}}>
-                    Set Password & Start Chatting →
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 3. Logged in, encryption enabled, needs password entry this session */}
-            {pingMe && pingEncryptEnabled && !sessionStorage.getItem("pulse_ping_pass") && pingScreen !== "setPassword" && (
-              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 24px",position:"relative"}}>
-                <div onClick={()=>setMainTab(null)} style={{position:"absolute",top:12,left:12,cursor:"pointer",display:"flex",alignItems:"center",gap:6,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.05)",padding:"8px 16px 8px 10px",borderRadius:24,transition:"background 0.15s ease",zIndex:10}} title="Back to Home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.textMuted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg><span style={{fontSize:13,fontWeight:700,color:T.textMuted}}>Home</span></div>
-                <div style={{fontSize:36,marginBottom:12}}>🔍</div>
-                <div style={{fontSize:18,fontWeight:900,color:T.text,fontFamily:"Georgia,serif",marginBottom:6}}>Enter Chat Password</div>
-                <div style={{fontSize:12,color:T.textFaint,marginBottom:24,textAlign:"center"}}>Enter your password to decrypt your messages</div>
-                <div style={{width:"100%",maxWidth:300}}>
-                  <input value={pingPasswordInput} onChange={e=>setPingPasswordInput(e.target.value)} type="password" placeholder="Your chat password"
-                    onKeyDown={e=>{if(e.key==="Enter"){sessionStorage.setItem("pulse_ping_pass",pingPasswordInput);setPingPassword(pingPasswordInput);setPingPasswordInput("");}}}
-                    style={{width:"100%",boxSizing:"border-box",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:T.text,outline:"none",marginBottom:14}}/>
-                  {pingError && <div style={{fontSize:11,color:"#FF3B5C",textAlign:"center",marginBottom:10}}>{pingError}</div>}
-                  <div onClick={()=>{
-                    if (!pingPasswordInput) return;
-                    sessionStorage.setItem("pulse_ping_pass", pingPasswordInput);
-                    setPingPassword(pingPasswordInput);
-                    setPingPasswordInput("");
-                  }} style={{background:"linear-gradient(135deg,#22C55E,#10B981)",borderRadius:16,padding:"13px",textAlign:"center",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff"}}>
-                    Unlock PingMe 🔒
-                  </div>
-                  <div onClick={()=>{setPingScreen("setPassword");}} style={{textAlign:"center",fontSize:11,color:T.textFaint,marginTop:12,cursor:"pointer"}}>Forgot password? Set a new one</div>
-                </div>
-              </div>
-            )}
-
-            {/* 4. Fully authenticated — Home (WhatsApp-style) */}
-            {pingMe && (pingPassword || !pingEncryptEnabled) && pingScreen === "home" && (
-              <>
-                {/* WhatsApp-style top bar */}
-                <div style={{background:"#40E0D0",padding:"14px 16px 12px",flexShrink:0}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <div onClick={()=>setMainTab(null)} style={{cursor:"pointer",display:"flex",alignItems:"center"}}>
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-                      </div>
-                      <span style={{fontSize:22,fontWeight:700,color:"#fff",letterSpacing:0.3}}>PingMe</span>
-                    </div>
-                    <div style={{position:"relative"}}>
-                      <div onClick={()=>setPingMenuOpen(!pingMenuOpen)} style={{cursor:"pointer",padding:"4px 2px",display:"flex",alignItems:"center"}}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-                      </div>
-                      {pingMenuOpen && (
-                        <>
-                          <div onClick={()=>setPingMenuOpen(false)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:99}}/>
-                          <div style={{position:"absolute",top:32,right:0,background:isDark?"#1F2C33":"#fff",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",minWidth:180,zIndex:100,overflow:"hidden"}}>
-                            <div onClick={()=>{setPingMenuOpen(false);setPingScreen("newGroup");pingLoadUsers();}} style={{padding:"14px 20px",cursor:"pointer",fontSize:14,color:isDark?"#E9EDEF":"#333",borderBottom:`1px solid ${isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.08)"}`}}>New Group</div>
-                            <div onClick={()=>{setPingMenuOpen(false);}} style={{padding:"14px 20px",cursor:"pointer",fontSize:14,color:isDark?"#E9EDEF":"#333"}}>Invite Members</div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Online contacts strip */}
-                {pingUsers.length > 0 && (
-                  <div style={{padding:"10px 12px 8px",borderBottom:`1px solid ${T.border}`,background:T.bg,flexShrink:0}}>
-                    <div style={{display:"flex",gap:14,overflowX:"auto",paddingBottom:2}}>
-                      {pingUsers.map(u=>{
-                        const isOnline = pingOnline[u.id] && (Date.now()-pingOnline[u.id])<120000;
-                        return (
-                          <div key={u.id} onClick={()=>pingOpenDm(u)} style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",gap:4,cursor:"pointer",width:56}}>
-                            <div style={{position:"relative"}}>
-                              {u.photo ? <img src={u.photo} style={{width:46,height:46,borderRadius:23,border:"2px solid "+(isOnline?"#25D366":"transparent")}} alt=""/> : <div style={{width:46,height:46,borderRadius:23,background:u.color||"#7C3AED",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:800,color:"#fff",border:"2px solid "+(isOnline?"#25D366":"transparent")}}>{u.name[0]}</div>}
-                              {isOnline && <div style={{position:"absolute",bottom:1,right:1,width:11,height:11,borderRadius:6,background:"#25D366",border:"2.5px solid "+T.bg}}/>}
-                            </div>
-                            <div style={{fontSize:10,color:T.textMuted,maxWidth:56,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"center",fontWeight:500}}>{u.name.split(" ")[0]}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Chat list */}
-                <div style={{flex:1,overflowY:"auto",position:"relative"}}>
-                  {pingGroups.map(g=>(
-                    <div key={g.id} onClick={()=>{setPingActiveChat(g);setPingScreen("chat");pingLoadMessages(g);}}
-                      style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",cursor:"pointer",borderBottom:`1px solid ${T.border}`}}>
-                      <div style={{width:50,height:50,borderRadius:25,background:g.color||"#25D366",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>👥</div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:3}}>
-                          <div style={{fontSize:15,fontWeight:600,color:T.text}}>{g.name}</div>
-                          <div style={{fontSize:11,color:T.textFaint,flexShrink:0}}>Group</div>
-                        </div>
-                        <div style={{fontSize:13,color:T.textMuted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{g.members?.length} members</div>
-                      </div>
-                    </div>
-                  ))}
-                  {pingUsers.map(u=>{
-                    const isOnline = pingOnline[u.id]&&(Date.now()-pingOnline[u.id])<120000;
-                    return (
-                    <div key={u.id} onClick={()=>pingOpenDm(u)}
-                      style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",cursor:"pointer",borderBottom:`1px solid ${T.border}`}}>
-                      <div style={{position:"relative"}}>
-                        {u.photo ? <img src={u.photo} style={{width:50,height:50,borderRadius:25}} alt=""/> : <div style={{width:50,height:50,borderRadius:25,background:u.color||"#7C3AED",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,fontWeight:800,color:"#fff"}}>{u.name[0]}</div>}
-                        {isOnline&&<div style={{position:"absolute",bottom:2,right:2,width:12,height:12,borderRadius:6,background:"#25D366",border:"2.5px solid "+T.bg}}/>}
-                      </div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:3}}>
-                          <div style={{fontSize:15,fontWeight:600,color:T.text}}>{u.name}</div>
-                          <div style={{fontSize:11,color:T.textFaint,flexShrink:0}}>{isOnline?"online":""}</div>
-                        </div>
-                        <div style={{fontSize:13,color:T.textMuted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
-                      </div>
-                    </div>
-                    );
-                  })}
-                  {pingGroups.length===0&&pingUsers.length===0&&(
-                    <div style={{textAlign:"center",padding:"60px 20px"}}>
-                      <div style={{fontSize:48,marginBottom:16,opacity:0.4}}>💬</div>
-                      <div style={{fontSize:16,fontWeight:600,color:T.text,marginBottom:8}}>No family contacts yet</div>
-                      <div style={{fontSize:13,color:T.textFaint,lineHeight:1.5}}>{fwMembers.length > 1 ? "Family members found — they need to open the app once to appear here" : "Go to Settings → Family Workspace to add family members first"}</div>
-                    </div>
-                  )}
-
-
-                </div>
-
-              </>
-            )}
-            {pingMe && pingPassword && pingScreen === "chat" && pingActiveChat && (
-              <>
-                <div style={{background:"#40E0D0",padding:"8px 12px",flexShrink:0,display:"flex",alignItems:"center",gap:10}}>
-                  <button onClick={()=>{setPingScreen("home");setPingActiveChat(null);setPingMessages([]);}} style={{background:"none",border:"none",color:"#fff",padding:"4px",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center"}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
-                  <div style={{width:38,height:38,borderRadius:19,background:pingActiveChat.color||"#25D366",display:"flex",alignItems:"center",justifyContent:"center",fontSize:pingActiveChat.type==="group"?18:15,fontWeight:800,color:"#fff",flexShrink:0}}>
-                    {pingActiveChat.type==="group"?"👥":pingActiveChat.name[0]}
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:16,fontWeight:600,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pingActiveChat.name}</div>
-                    <div style={{fontSize:11,color:"rgba(255,255,255,0.7)"}}>{pingActiveChat.type==="group" ? (pingActiveChat.members?.length+" members") : "tap here for info"}</div>
-                  </div>
-                  {pingLoading && <div style={{fontSize:10,color:"rgba(255,255,255,0.6)"}}>syncing…</div>}
-                </div>
-                <div ref={pingMsgRef} style={{flex:1,overflowY:"auto",padding:"8px 12px",display:"flex",flexDirection:"column",gap:4,background:isDark?"#0B141A":"#ECE5DD"}}>
-                  {pingMessages.map((m,i)=>{
-                    const isMe = m.from===pingMe.email;
-                    return (
-                      <div key={m.id||i} style={{display:"flex",flexDirection:"column",alignItems:isMe?"flex-end":"flex-start"}}>
-                        {pingActiveChat.type==="group"&&!isMe&&<div style={{fontSize:11,color:"#25D366",fontWeight:600,marginBottom:1,marginLeft:8}}>{m.fromName}</div>}
-                        <div style={{maxWidth:"80%",background:isMe?(isDark?"#005C4B":"#DCF8C6"):(isDark?"#1F2C33":"#fff"),borderRadius:isMe?"8px 8px 2px 8px":"8px 8px 8px 2px",padding:"6px 10px 4px",boxShadow:"0 1px 1px rgba(0,0,0,0.08)"}}>
-                          <div style={{fontSize:14,color:isDark?"#E9EDEF":"#111B21",lineHeight:1.4}}>{m.text}</div>
-                          <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:3,marginTop:2}}>
-                            <span style={{fontSize:10,color:isDark?"rgba(255,255,255,0.45)":"#667781"}}>{pingTimeStr(m.ts)}</span>
-                            {isMe&&<span style={{fontSize:12,color:m.read?"#53BDEB":"#667781"}}>{m.read?"✔✔":"✔"}</span>}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {pingMessages.length===0&&!pingLoading&&<div style={{textAlign:"center",color:T.textFaint,fontSize:13,marginTop:40}}>No messages yet — say hi! 👋</div>}
-                  {pingLoading&&pingMessages.length===0&&<div style={{textAlign:"center",color:T.textFaint,fontSize:13,marginTop:40}}>Loading messages…</div>}
-                </div>
-                <div style={{padding:"6px 8px",borderTop:`1px solid ${T.border}`,display:"flex",gap:6,alignItems:"center",flexShrink:0,background:isDark?"#1F2C33":"#F0F2F5"}}>
-                  <input value={pingInput} onChange={e=>setPingInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&pingSend()}
-                    placeholder="Message"
-                    style={{flex:1,background:isDark?"#2A3942":"#fff",border:"none",borderRadius:24,padding:"10px 16px",fontSize:14,color:T.text,outline:"none"}}/>
-                  <div onClick={pingSend} style={{width:44,height:44,borderRadius:22,background:"#25D366",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* 6. New Group screen */}
-            {pingMe && pingPassword && pingScreen === "newGroup" && (
-              <>
-                <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,flexShrink:0,display:"flex",alignItems:"center",gap:10}}>
-                  <button onClick={()=>setPingScreen("home")} style={{background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.05)",border:"none",borderRadius:20,color:T.textMuted,padding:"8px 12px",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center"}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
-                  <div style={{fontSize:15,fontWeight:800,color:T.text}}>New Group</div>
-                </div>
-                <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
-                  <div style={{fontSize:11,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",fontWeight:700,marginBottom:6}}>Group Name</div>
-                  <input value={pingNewGroup.name} onChange={e=>setPingNewGroup(p=>({...p,name:e.target.value}))} placeholder="e.g. Family, Friends…"
-                    style={{width:"100%",boxSizing:"border-box",background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",fontSize:14,color:T.text,outline:"none",marginBottom:16}}/>
-                  <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",fontWeight:700,marginBottom:8}}>Add Members</div>
-                  <div style={{background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:10,padding:"8px 12px",marginBottom:12,fontSize:11,color:"#22C55E"}}>
-                    🔒 A shared Google Drive folder will be created automatically for all members
-                  </div>
-                  {pingUsers.length===0&&<div style={{fontSize:12,color:T.textFaint,textAlign:"center",padding:"20px 0"}}>No other PingMe users found</div>}
-                  <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:20}}>
-                    {pingUsers.map(u=>{
-                      const sel = pingNewGroup.members.includes(u.email);
-                      return (
-                        <div key={u.id} onClick={()=>setPingNewGroup(p=>({...p,members:sel?p.members.filter(x=>x!==u.email):[...p.members,u.email]}))}
-                          style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:14,background:sel?"rgba(34,197,94,0.1)":T.bgCard,border:`1px solid ${sel?"#22C55E":T.border}`,cursor:"pointer"}}>
-                          {u.photo?<img src={u.photo} style={{width:36,height:36,borderRadius:18}} alt=""/>:<div style={{width:36,height:36,borderRadius:18,background:u.color||"#7C3AED",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,color:"#fff"}}>{u.name[0]}</div>}
-                          <div style={{flex:1}}>
-                            <div style={{fontSize:13,fontWeight:700,color:T.text}}>{u.name}</div>
-                            <div style={{fontSize:10,color:T.textFaint}}>{u.email}</div>
-                          </div>
-                          <div style={{width:22,height:22,borderRadius:11,border:`2px solid ${sel?"#22C55E":T.border}`,background:sel?"#22C55E":"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#fff"}}>{sel?"✔":""}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div onClick={pingCreateGroup} style={{background:pingNewGroup.name&&pingNewGroup.members.length?"linear-gradient(135deg,#22C55E,#10B981)":"rgba(34,197,94,0.3)",borderRadius:16,padding:"14px",textAlign:"center",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff"}}>
-                    Create Group ({pingNewGroup.members.length} members)
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        )}
 
         {/* ─── CONTACTS SCREEN ────────────────────────────────────────*/}
         {mainTab === "contacts" && (
@@ -8434,72 +7630,6 @@ export default function PulseApp() {
                 </div>
               </div>
 
-              {/* PingMe Encryption */}
-              <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
-                <span>🔒</span> PingMe Encryption
-              </div>
-
-              <div style={{background:T.bgCard,borderRadius:16,border:`1px solid ${T.border}`,overflow:"hidden",marginBottom:20}}>
-                <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:pingEncryptEnabled?`1px solid ${T.border}`:"none"}}>
-                  <div style={{width:34,height:34,borderRadius:10,background:"rgba(20,184,166,0.12)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#14B8A6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:14,fontWeight:700,color:T.text}}>Password Protection</div>
-                    <div style={{fontSize:11,color:T.textFaint}}>Encrypt chats with a custom password</div>
-                  </div>
-                  <div onClick={()=>{
-                    const next = !pingEncryptEnabled;
-                    setPingEncryptEnabled(next);
-                    localStorage.setItem("pulse_ping_encrypt", next ? "true" : "false");
-                    saveSettingsToDrive({ pingEncrypt: next });
-                    if (!next) {
-                      sessionStorage.removeItem("pulse_ping_pass");
-                      setPingPassword("PulseDefaultKey2026");
-                    } else if (!sessionStorage.getItem("pulse_ping_pass")) {
-                      setPingScreen("setPassword");
-                    }
-                  }} style={{width:44,height:26,borderRadius:13,background:pingEncryptEnabled?"#14B8A6":(isDark?"rgba(255,255,255,0.12)":"rgba(0,0,0,0.1)"),padding:2,cursor:"pointer",transition:"background 0.2s",display:"flex",alignItems:pingEncryptEnabled?"center":"center"}}>
-                    <div style={{width:22,height:22,borderRadius:11,background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,0.2)",transition:"transform 0.2s",transform:pingEncryptEnabled?"translateX(18px)":"translateX(0)"}}/>
-                  </div>
-                </div>
-                {pingEncryptEnabled && (
-                  <div style={{padding:"12px 16px"}}>
-                    <div style={{fontSize:11,color:"#14B8A6",fontWeight:600}}>
-                      {sessionStorage.getItem("pulse_ping_pass") && sessionStorage.getItem("pulse_ping_pass") !== "PulseDefaultKey2026"
-                        ? "✓ Password is set for this session"
-                        : "⚠️ No password set — tap PingMe to create one"}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* PingMe Notifications */}
-              <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
-                <span>💬</span> PingMe Notifications
-              </div>
-              <div style={{background:T.bgCard,borderRadius:16,border:`1px solid ${T.border}`,overflow:"hidden",marginBottom:20}}>
-                <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px"}}>
-                  <div style={{width:34,height:34,borderRadius:10,background:"rgba(20,184,166,0.12)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#14B8A6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:14,fontWeight:700,color:T.text}}>Message Notifications</div>
-                    <div style={{fontSize:12,color:T.textMuted,marginTop:2}}>
-                      {typeof Notification === 'undefined' ? 'Not supported on this device' :
-                       Notification.permission === 'granted' ? '✅ Enabled — you\'ll get notified of new messages' :
-                       Notification.permission === 'denied' ? '❌ Blocked — enable in browser settings' :
-                       'Tap to enable message notifications'}
-                    </div>
-                  </div>
-                  {typeof Notification !== 'undefined' && Notification.permission !== 'granted' && Notification.permission !== 'denied' && (
-                    <button onClick={()=>Notification.requestPermission()} style={{background:"#14B8A6",color:"#fff",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Enable</button>
-                  )}
-                  {typeof Notification !== 'undefined' && Notification.permission === 'denied' && (
-                    <span style={{fontSize:11,color:"#FF3B5C",fontWeight:600}}>Blocked</span>
-                  )}
-                </div>
-              </div>
               {/* Notification Sound */}
               <div style={{fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
                 <span>🔔</span> Notification Sound
@@ -8541,7 +7671,6 @@ export default function PulseApp() {
                 {key:null,label:"Home",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},
                 {key:"movies",label:"Movies",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>},
                 {key:"grocery",label:"Shop",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>},
-                {key:"ping",label:"Chat",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"rgba(255,255,255,0.4)":"rgba(0,0,0,0.35)"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>},
                 {key:"settings",label:"Settings",icon:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isDark?"#fff":"#000"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>}
               ].map(nav=>(
                 <div key={nav.key||"home"} onClick={()=>setMainTab(nav.key)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 12px",WebkitTapHighlightColor:"transparent"}}>

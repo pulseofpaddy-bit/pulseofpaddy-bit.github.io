@@ -4,8 +4,7 @@ import {
   emailKey,
   folderKey,
   getHouseholdId,
-  pingCollection,
-  pingSafeEmail,
+  healthCollection,
   setHouseholdId,
   userNodeKey,
   withAuth,
@@ -26,22 +25,16 @@ describe("household keys", () => {
     expect(folderKey("ab.cd$ef")).toBe("ab,cd,ef");
   });
 
-  test("PingMe inbox keys use underscores", () => {
-    expect(pingSafeEmail("Ada.Smith@gmail.com")).toBe("Ada_Smith_gmail_com");
-  });
 });
 
 describe("paths and auth query", () => {
-  test("chat URLs are under the household and are absent until an id is set", () => {
+  test("health URLs stay under the household and are absent until an id is set", () => {
     setHouseholdId("");
-    expect(pingCollection("users.json")).toBeNull();
+    expect(healthCollection("periods")).toBeNull();
     setHouseholdId("ada,gmail,com");
     expect(getHouseholdId()).toBe("ada,gmail,com");
-    expect(pingCollection("users.json")).toBe(
-      "https://pulse-family-default-rtdb.firebaseio.com/households/ada,gmail,com/pingme/users.json"
-    );
-    expect(pingCollection("")).toBe(
-      "https://pulse-family-default-rtdb.firebaseio.com/households/ada,gmail,com/pingme"
+    expect(healthCollection("periods")).toBe(
+      "https://pulse-family-default-rtdb.firebaseio.com/households/ada,gmail,com/health/periods.json"
     );
     setHouseholdId("");
   });
@@ -75,13 +68,13 @@ describe("database rules", () => {
     expect(rules[".write"]).toBe(false);
   });
 
-  test("household membership guards family data and old chat is read-only", () => {
+  test("household membership guards family data and chat rules are gone", () => {
     expect(rules.households.$householdId.members.$uid[".write"]).toContain("auth.uid == $uid");
     expect(rules.family.$householdId[".read"]).toContain("members");
     expect(rules.reservations.$userKey[".read"]).toContain("auth.token.email");
     expect(rules.clothing.$userKey[".write"]).toContain("auth.token.email");
-    expect(rules.pingme[".write"]).toBe(false);
-    expect(rules.pingme[".read"]).toContain("legacyHouseholdId");
-    expect(rules.households.$householdId.pingme[".write"]).toContain("members");
+    expect(rules.pingme).toBeUndefined();
+    expect(rules.households.$householdId.pingme).toBeUndefined();
+    expect(rules.meta).toBeUndefined();
   });
 });

@@ -3,13 +3,6 @@
     ".read": false,
     ".write": false,
 
-    "meta": {
-      "legacyHouseholdId": {
-        ".read": "auth != null && data.val() != null && root.child('households').child(data.val()).child('members').child(auth.uid).exists()",
-        ".write": "auth != null && !data.exists() && newData.isString() && newData.val() == auth.token.email.replace('.', ',').replace('#', ',').replace('$', ',').replace('[', ',').replace(']', ',').replace('@', ',') && root.child('family').child(newData.val()).exists()"
-      }
-    },
-
     "households": {
       "$householdId": {
         "members": {
@@ -17,14 +10,6 @@
             ".read": "auth != null && root.child('households').child($householdId).child('members').child(auth.uid).exists()",
             ".write": "auth != null && auth.uid == $uid && newData.child('email').val() == auth.token.email && ($householdId == auth.token.email.replace('.', ',').replace('#', ',').replace('$', ',').replace('[', ',').replace(']', ',').replace('@', ',') || root.child('member_lookup').child(auth.token.email.replace('.', ',').replace('#', ',').replace('$', ',').replace('[', ',').replace(']', ',').replace('@', ',')).child('headKey').val() == $householdId || (data.exists() && data.child('uid').val() == auth.uid))"
           }
-        },
-        "pingme": {
-          ".read": "auth != null && root.child('households').child($householdId).child('members').child(auth.uid).exists()",
-          ".write": "auth != null && root.child('households').child($householdId).child('members').child(auth.uid).exists()"
-        },
-        "pingmeMigrated": {
-          ".read": "auth != null && root.child('households').child($householdId).child('members').child(auth.uid).exists()",
-          ".write": "auth != null && root.child('households').child($householdId).child('members').child(auth.uid).exists()"
         },
         "health": {
           ".read": "auth != null && (root.child('households').child($householdId).child('members').child(auth.uid).child('gender').val() == 'girl' || (root.child('households').child($householdId).child('members').child(auth.uid).child('gender').val() == 'female' && (root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'head' || root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'spouse' || root.child('households').child($householdId).child('members').child(auth.uid).child('relation').val() == 'child' || root.child('households').child($householdId).child('members').child(auth.uid).child('role').val() == 'head')))",
@@ -59,11 +44,6 @@
         ".read": "auth != null && ($memberKey == auth.token.email.replace('.', ',').replace('#', ',').replace('$', ',').replace('[', ',').replace(']', ',').replace('@', ',') || root.child('member_lookup').child($memberKey).child('headKey').val() == auth.token.email.replace('.', ',').replace('#', ',').replace('$', ',').replace('[', ',').replace(']', ',').replace('@', ','))",
         ".write": "auth != null && (newData.child('headKey').val() == auth.token.email.replace('.', ',').replace('#', ',').replace('$', ',').replace('[', ',').replace(']', ',').replace('@', ',') || $memberKey == auth.token.email.replace('.', ',').replace('#', ',').replace('$', ',').replace('[', ',').replace(']', ',').replace('@', ','))"
       }
-    },
-
-    "pingme": {
-      ".read": "auth != null && root.child('meta').child('legacyHouseholdId').val() != null && root.child('households').child(root.child('meta').child('legacyHouseholdId').val()).child('members').child(auth.uid).exists()",
-      ".write": false
     }
   }
 }

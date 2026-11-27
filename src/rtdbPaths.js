@@ -15,11 +15,6 @@ export function folderKey(id) {
   return String(id || "").replace(/[.#$[\]]/g, ",");
 }
 
-// PingMe notification inbox. Dots and @ become underscores, same as before.
-export function pingSafeEmail(email) {
-  return String(email || "").replace(/[.@]/g, "_");
-}
-
 let householdId = "";
 
 export function setHouseholdId(id) {
@@ -30,27 +25,9 @@ export function getHouseholdId() {
   return householdId;
 }
 
-export function householdPingRoot() {
-  if (!householdId) return null;
-  return `${RTDB_ROOT}/households/${householdId}/pingme`;
-}
-
-// Chat data lives under the household so another household can be added later
-// without moving grocery, travel, or clothing paths.
-export function pingCollection(path) {
-  const root = householdPingRoot();
-  if (!root) return null;
-  const clean = String(path || "").replace(/^\/+/, "");
-  return clean ? `${root}/${clean}` : root;
-}
-
 export function healthCollection(kind) {
   if (!householdId) return null;
   return `${RTDB_ROOT}/households/${householdId}/health/${kind}.json`;
-}
-
-export function legacyPingUrl() {
-  return `${RTDB_ROOT}/pingme.json`;
 }
 
 export function withAuth(url, token) {
