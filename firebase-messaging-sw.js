@@ -1,8 +1,7 @@
 // PulseApp Service Worker — Background Notifications
 // Handles: PingMe chat notifications + To-Do due-date reminders (even when app is closed)
 
-const FIREBASE_DB = "https://pulse-family-default-rtdb.firebaseio.com/pingme";
-const CACHE_NAME  = "pulse-sw-state-v2";
+const CACHE_NAME  = "pulse-sw-state-v3";
 
 // ─── Helper: read/write from Cache Storage ────────────────────────────────────
 async function cacheGet(key) {
@@ -27,7 +26,46 @@ self.addEventListener('message', function(event) {
   if (event.data?.type === 'SET_TODO_ITEMS') {
     cacheSet('todo-items', JSON.stringify(event.data.items));
   }
+  if (event.data?.type === 'SET_FIREBASE_AUTH') {
+    cacheSet('fb-token', event.data.token || '');
+    cacheSet('fb-refresh', event.data.refreshToken || '');
+    cacheSet('fb-exp', String(event.data.expiresAt || 0));
+    cacheSet('fb-api-key', event.data.apiKey || '');
+    cacheSet('fb-ping-base', event.data.pingBase || '');
+  }
 });
+
+function withAuth(url, token) {
+  const parsed = new URL(url);
+  if (token) parsed.searchParams.set('auth', token);
+  return parsed.toString();
+}
+
+async function swFirebaseToken() {
+  let token = await cacheGet('fb-token');
+  const exp = parseInt(await cacheGet('fb-exp') || '0', 10);
+  if (token && Date.now() < exp - 60000) return token;
+  const refresh = await cacheGet('fb-refresh');
+  const apiKey = await cacheGet('fb-api-key');
+  if (!refresh || !apiKey) return token || '';
+  try {
+    const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refresh)}`,
+    });
+    if (!res.ok) return '';
+    const data = await res.json();
+    if (!data.id_token) return '';
+    const expiresAt = Date.now() + Number(data.expires_in || 3600) * 1000;
+    await cacheSet('fb-token', data.id_token);
+    if (data.refresh_token) await cacheSet('fb-refresh', data.refresh_token);
+    await cacheSet('fb-exp', String(expiresAt));
+    return data.id_token;
+  } catch {
+    return '';
+  }
+}
 
 // ─── Push event (FCM) ────────────────────────────────────────────────────────
 self.addEventListener('push', function(event) {
@@ -82,11 +120,13 @@ async function backgroundCheck() {
 async function checkPingMeNotifications() {
   try {
     const userEmail = await cacheGet('user-email');
-    if (!userEmail) return;
+    const pingBase = await cacheGet('fb-ping-base');
+    const token = await swFirebaseToken();
+    if (!userEmail || !pingBase || !token) return;
     const safeEmail  = userEmail.replace(/[.@]/g, '_');
     const lastSeenTs = parseInt(await cacheGet('pingme-last-seen') || '0');
 
-    const res  = await fetch(`${FIREBASE_DB}/notifications/${safeEmail}.json`);
+    const res  = await fetch(withAuth(`${pingBase}/notifications/${safeEmail}.json`, token), { referrer: 'no-referrer' });
     if (!res.ok) return;
     const data = await res.json();
     if (!data) return;
